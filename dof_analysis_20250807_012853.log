@@ -1,7 +1,0 @@
-2025-08-07 01:28:53,222 - INFO - Downloading NLTK misc: perluniprops
-2025-08-07 01:28:53,360 - INFO - Downloading NLTK misc: nonbreaking_prefixes
-2025-08-07 01:28:53,979 - INFO - Initializing analysis framework...
-2025-08-07 01:28:53,981 - INFO - Loading JSON files from: C:\Users\dsng3\Documents\GitHub\DoF_Experiment\results\gemini\gemini-2.0-flash
-2025-08-07 01:28:53,982 - INFO - Found 0 JSON files in C:\Users\dsng3\Documents\GitHub\DoF_Experiment\results\gemini\gemini-2.0-flash
-2025-08-07 01:28:53,983 - INFO - Successfully loaded 0 valid JSON files
-2025-08-07 01:28:53,983 - ERROR - No valid JSON files found. Exiting.
