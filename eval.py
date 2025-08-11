@@ -1,13 +1,3 @@
-"""
-Degree of Freedom (DoF) Impact Analysis on Large Language Model Text Generation
-A comprehensive evaluation framework for analyzing the relationship between 
-generation freedom and linguistic quality metrics.
-
-Author: [Your Name]
-Date: 2025
-Version: 1.0.0
-"""
-
 import json
 import os
 import glob
@@ -890,49 +880,45 @@ class AdvancedVisualization:
     
     def create_correlation_heatmap(self, correlation_df: pd.DataFrame, 
                                   output_path: str = 'dof_correlation_heatmap.pdf'):
-        """Create correlation heatmap for all metrics."""
+        """Create correlation heatmap for all metrics, robust to NaNs."""
         
         fig, axes = plt.subplots(1, 3, figsize=(15, 5))
         
-        # Prepare data for heatmaps
-        metrics = correlation_df['metric'].tolist()
+        panels = [
+            ("pearson_r", "Pearson's r"),
+            ("spearman_rho", "Spearman's ρ"),
+            ("kendall_tau", "Kendall's τ"),
+        ]
         
-        # Pearson correlation heatmap
-        pearson_matrix = correlation_df.pivot_table(
-            index='metric', values='pearson_r', aggfunc='first'
-        ).values.reshape(-1, 1)
-        
-        # Spearman correlation heatmap
-        spearman_matrix = correlation_df.pivot_table(
-            index='metric', values='spearman_rho', aggfunc='first'
-        ).values.reshape(-1, 1)
-        
-        # Kendall's tau heatmap
-        kendall_matrix = correlation_df.pivot_table(
-            index='metric', values='kendall_tau', aggfunc='first'
-        ).values.reshape(-1, 1)
-        
-        # Plot heatmaps
-        for idx, (data, title, cmap) in enumerate([
-            (pearson_matrix, "Pearson's r", 'RdBu_r'),
-            (spearman_matrix, "Spearman's ρ", 'RdBu_r'),
-            (kendall_matrix, "Kendall's τ", 'RdBu_r')
-        ]):
-            im = axes[idx].imshow(data, cmap=cmap, aspect='auto', vmin=-1, vmax=1)
-            axes[idx].set_yticks(range(len(metrics)))
-            axes[idx].set_yticklabels(metrics)
+        for idx, (col, title) in enumerate(panels):
+            # Use only valid rows for this correlation type
+            sub = correlation_df[['metric', col]].dropna()
+            if sub.empty:
+                axes[idx].set_title(title + " (no valid data)", fontweight='bold')
+                axes[idx].axis('off')
+                continue
+            
+            metrics_valid = sub['metric'].tolist()
+            data = sub[col].to_numpy().reshape(-1, 1)
+            
+            im = axes[idx].imshow(data, cmap='RdBu_r', aspect='auto', vmin=-1, vmax=1)
+            axes[idx].set_yticks(range(len(metrics_valid)))
+            axes[idx].set_yticklabels(metrics_valid)
             axes[idx].set_xticks([0])
             axes[idx].set_xticklabels(['DoF'])
             axes[idx].set_title(title, fontweight='bold')
             
-            # Add values as text
-            for i in range(len(metrics)):
-                text = axes[idx].text(0, i, f'{data[i, 0]:.3f}',
-                                     ha='center', va='center',
-                                     color='white' if abs(data[i, 0]) > 0.5 else 'black',
-                                     fontweight='bold')
+            # Add value labels safely
+            for i in range(data.shape[0]):
+                val = data[i, 0]
+                if np.isnan(val):
+                    txt = "nan"
+                    color = 'black'
+                else:
+                    txt = f"{val:.3f}"
+                    color = 'white' if abs(val) > 0.5 else 'black'
+                axes[idx].text(0, i, txt, ha='center', va='center', color=color, fontweight='bold')
             
-            # Add colorbar
             cbar = plt.colorbar(im, ax=axes[idx], fraction=0.046, pad=0.04)
             cbar.ax.set_ylabel('Correlation Coefficient', rotation=270, labelpad=15)
         
@@ -1011,7 +997,6 @@ class DataProcessor:
         """
         json_files = glob.glob(os.path.join(folder_path, '*.json'))
         all_data = []
-        
         logger.info(f"Found {len(json_files)} JSON files in {folder_path}")
         
         for file_path in tqdm(json_files, desc="Loading JSON files"):

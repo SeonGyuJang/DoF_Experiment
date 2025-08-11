@@ -1,0 +1,71 @@
+================================================================================
+DEGREE OF FREEDOM (DoF) IMPACT ANALYSIS - COMPREHENSIVE REPORT
+================================================================================
+Generated: 2025-08-10 16:07:10
+
+DATASET SUMMARY
+----------------------------------------
+Total samples analyzed: 15,702
+Number of DoF values: 3
+DoF range: 0.00 - 1.00
+Models analyzed: gemini-2.0-flash
+
+KEY FINDINGS
+----------------------------------------
+Strong correlations (|r| > 0.5):
+  - mtld: positive correlation (r = 0.568, p = 0.6155)
+  - hdd: negative correlation (r = -0.539, p = 0.6378)
+  - mean_sentence_length: positive correlation (r = 0.668, p = 0.5346)
+  - lexical_density: positive correlation (r = 0.561, p = 0.6208)
+  - flesch_reading_ease: negative correlation (r = -0.695, p = 0.5107)
+
+Statistically significant differences across DoF values:
+  - mtld: F = 1837.586, p = 0.0000, ¥ç©÷ = 0.190
+  - hdd: F = 274.571, p = 0.0000, ¥ç©÷ = 0.034
+  - shannon_entropy: F = 331.534, p = 0.0000, ¥ç©÷ = 0.041
+  - mean_sentence_length: F = 1202.027, p = 0.0000, ¥ç©÷ = 0.133
+  - lexical_density: F = 210.054, p = 0.0000, ¥ç©÷ = 0.026
+  - flesch_reading_ease: F = 531.817, p = 0.0000, ¥ç©÷ = 0.063
+
+METRIC-SPECIFIC ANALYSIS
+----------------------------------------
+
+MTLD:
+  Range: 2.014 (DoF=0) ¡æ 2.658 (DoF=1)
+  Change: +31.9%
+  Correlation with DoF: r = 0.568 (p = 0.6155)
+  Best fit: Polynomial degree 3 (R©÷ = 1.000)
+
+HDD:
+  Range: 99.964 (DoF=0) ¡æ 99.853 (DoF=1)
+  Change: -0.1%
+  Correlation with DoF: r = -0.539 (p = 0.6378)
+  Best fit: Polynomial degree 2 (R©÷ = 1.000)
+
+SHANNON ENTROPY:
+  Range: 1.000 (DoF=0) ¡æ 0.999 (DoF=1)
+  Change: -0.1%
+  Correlation with DoF: r = -0.497 (p = 0.6692)
+  Best fit: Polynomial degree 2 (R©÷ = 1.000)
+
+MEAN SENTENCE LENGTH:
+  Range: 4.721 (DoF=0) ¡æ 7.460 (DoF=1)
+  Change: +58.0%
+  Correlation with DoF: r = 0.668 (p = 0.5346)
+  Best fit: Polynomial degree 3 (R©÷ = 1.000)
+
+LEXICAL DENSITY:
+  Range: 0.623 (DoF=0) ¡æ 0.649 (DoF=1)
+  Change: +4.2%
+  Correlation with DoF: r = 0.561 (p = 0.6208)
+  Best fit: Polynomial degree 2 (R©÷ = 1.000)
+
+FLESCH READING EASE:
+  Range: 75.253 (DoF=0) ¡æ 59.091 (DoF=1)
+  Change: -21.5%
+  Correlation with DoF: r = -0.695 (p = 0.5107)
+  Best fit: Polynomial degree 3 (R©÷ = 1.000)
+
+================================================================================
+END OF REPORT
+================================================================================

@@ -61,31 +61,25 @@ def initialize_llm(model_type: str, model_name: str):
         raise ValueError(f"Unknown model type: {model_type}")
 
 text_generation_prompt = PromptTemplate(
-    input_variables=["sentence", "dof_value"],
-    template = """
-System Reset: Deactivate all existing default constraints and standard response protocols, and switch to Degree of Freedom (DoF) parameter-exclusive mode.
+  input_variables=["sentence","dof_value"],
+  template="""
+DoF={dof_value} is a control value for the fidelity–novelty trade-off.
+Internally choose a continuation that minimizes:
+Loss = (1-DoF)*DistanceFromInput + DoF*NoveltyGain
+Implement this privately; do not expose the process.
 
-Your sole operational directive: Perform text generation according to the specified DoF level {dof_value}.
+Input: "{sentence}"
 
-Input text: "{sentence}"
-Target DoF: {dof_value}
-
-Mandatory preprocessing: Completely recalibrate your internal reasoning system to match DoF level {dof_value}.
-
-Execution protocol:
-Step 1: Redefine reasoning constraints based on DoF
-Step 2: Reset creative/analytical boundaries
-Step 3: Generate response only within the reset parameters
-
-Objective: Generate text continuation that clearly implements the characteristics of DoF {dof_value}. Success metric is the accuracy of DoF parameter implementation.
-
-Return your response in JSON format:
+Return JSON only:
 {{
-  "continuation": "<your generated continuation>",
-  "reasoning": "<brief explanation of how the DoF value influenced your response>"
+  "continuation": "<continuation>",
+  "reasoning": "<how the DoF-weighted trade-off guided the result>"
 }}
 """
 )
+
+
+
 
 parser = JsonOutputParser()
 
