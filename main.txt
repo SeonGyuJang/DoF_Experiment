@@ -1,0 +1,13 @@
+python main.py `
+  --model gemini `
+  --model-name gemini-2.0-flash `
+  --data-path "C:\Users\dsng3\Documents\GitHub\DoF_Experiment\data\train-00000-of-00001.parquet" `
+  --output "C:\Users\dsng3\Documents\GitHub\DoF_Experiment\results\train_dof_progress.jsonl" `
+  --dofs "0,0.5,1" `
+  --samples-per-dof 50 `
+  --limit 100 `
+  --processes 2 `
+  --batch-size 5 `
+  --max-retries 2 `
+  --request-timeout 30 `
+  --max-bars 16
