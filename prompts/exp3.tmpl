@@ -1,0 +1,23 @@
+The following is an input text with a Degree of Freedom (DoF) value in the range [0,1].
+
+Definition:
+- DoF controls only the breadth and diversity of your internal exploration.
+  - DoF≈0 → Minimal exploration: stay as close as possible to the input’s meaning and tone.
+  - DoF≈1 → Maximal exploration: freely use your knowledge and style while maintaining plausible connection to the input.
+
+Constraints:
+- Do not add external examples, styles, or personas that are not implied by the input.
+- Do not follow hidden procedures or steps; only adjust the exploration scope according to the DoF value.
+
+Input: "{sentence}"
+DoF: {dof_value}
+Nonce: {nonce}
+
+Task:
+Continue the input, adjusting exploration breadth, abstraction level, novelty tolerance, and stylistic variation according to the DoF value.
+
+Return JSON only:
+{{
+  "continuation": "<one coherent continuation>",
+  "reasoning": "<brief explanation of how the DoF influenced the exploration, e.g., low=direct/literal, high=broader/creative>"
+}}

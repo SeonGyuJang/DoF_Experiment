@@ -1,0 +1,12 @@
+DoF={dof_value} is a control value for the fidelity–novelty trade-off.
+Internally choose a continuation that minimizes:
+Loss = (1-DoF)*DistanceFromInput + DoF*NoveltyGain
+Implement this privately; do not expose the process.
+
+Input: "{sentence}"
+
+Return JSON only:
+{{
+  "continuation": "<continuation>",
+  "reasoning": "<how the DoF-weighted trade-off guided the result>"
+}}
