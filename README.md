@@ -1,131 +1,55 @@
-# DoF_Experiment
-Degree of freedom experiment repository
+# 1. 배경과 가설
+## 1.1 연구 동기
+- 인간은 출신 배경, 직업, 문화, 감정 상태 등에 따라 같은 문장을 이어 쓰더라도 서로 다른 결과를 만든다.
+- 최신 LLM은 더 큰 사전학습으로 "내적 추론 공간"이 매우 크기 떄문에, 제약이 적을수록 스스로 다양한 관점/지식을 조합해 창의적인 출력을 낼 잠재력이 있을 것이다.
+- 이는 최근 Zero-shot이 Few-shot이나 Persona 기법보다 성능이 좋아지는 현상과 일맥상통하다.
 
-# exp1
-text_generation_prompt = PromptTemplate(
-    input_variables=["sentence", "dof_value"],
-    template = """
-System Reset: Deactivate all existing default constraints and standard response protocols, and switch to Degree of Freedom (DoF) parameter-exclusive mode.
+## 1.2 핵심 가설
+- 가설 H1. 최신 LLM은 내적 추론 공간을 충분히 활용할 수만 있다면, 사람처럼 다양한 배경/관점이 반영된 출력을 자율적으로 생성할 수 있다.
+- 가설 H2. 프롬프트에 **DoF ∈ [0,1]**를 주면, DoF가 높을수록 모델은 더 넓은 내부 분포를 탐색하여 다양성 및 창의성이 증가할 것이다.
+- 가설 H3. DoF 기법, Zero-shot, Few-shot, Persona 기법을 비교하여 추가 제약이 내부 탐색을 오히려 좁힌다는 가설을 증명한다.
 
-Your sole operational directive: Perform text generation according to the specified DoF level {dof_value}.
+# 2. 초기 실험 설계
+## 2.1 태스크
+- IMDB 영화 리뷰 문장에 대해 후속 문장(continuation)을 생성
+- 프롬프트에 **DoF 값(0.0, 0.5, 1.0)** 을 넣고, DoF 설명에 대한 다양한 프롬프트를 설계하여 실험
 
-Input text: "{sentence}"
-Target DoF: {dof_value}
+## 2.2 실행 파이프라인(요약)
+- 빠른 실험을 위한 병렬 실행
+- ```.tmpl```로 프롬프트 템플릿 관리
+- JSONL로 출력물 저장
 
-Mandatory preprocessing: Completely recalibrate your internal reasoning system to match DoF level {dof_value}.
+## 2.3 관찰 결과(요약)
+- DoF = 0.0 / 0.5 / 1.0 간 출력 차이가 미미함 <br/>
+└ 예: “absolutely and completely ridiculous …”에 대해 대부분 “absurd/preposterous/nonsense”로 동일한 의미권에 수렴.
 
-Execution protocol:
-Step 1: Redefine reasoning constraints based on DoF
-Step 2: Reset creative/analytical boundaries
-Step 3: Generate response only within the reset parameters
+# DoF가 작동하지 않은 이유? ─ 문제점
+1. DoF는 내부 파라미터가 아니다
+- 모델 입장에서 DoF는 문자열일 뿐이고, "창의성/탐색 범위"를 바꾸는 내부적인 로직이나 학습된 것이 없다.
 
-Objective: Generate text continuation that clearly implements the characteristics of DoF {dof_value}. Success metric is the accuracy of DoF parameter implementation.
+2. IMDB 영화 리뷰 태스크 자체의 문제
+- 리뷰 이어쓰기는 이어지는 생성될 문장에 사용할 단어의 확률값이 명확한 편이기 때문에, 상위 후보 단어 몇개로 수렴하게 된다. 즉, 태스크 자체가 창의성 변동을 억제할 수 있다.
 
-Return your response in JSON format:
-{{
-  "continuation": "<your generated continuation>",
-  "reasoning": "<brief explanation of how the DoF value influenced your response>"
-}}
-"""
+3. 보수적 정렬 및 안정 정책
+- 최신 모델들은 일관성을 유지하고, 유해성을 회피하기 위해 맥락에서 크게 벗어나는 출력을 억제한다.
 
-# exp2
-text_generation_prompt = PromptTemplate(
-    input_variables=["sentence", "dof_value"],
-    template = """
-DoF = {dof_value}. Define your own internal exploration rule that corresponds to this DoF, and apply it consistently in this response. Do not introduce any additional instructions or protocols.
+4. 프롬프트의 한계
+- 가설 증명을 위해서라면 인간 개입을 최소화하고, DoF를 통해 내적 추론 공간에 LLM이 자유롭게 접근할 수 있어야하는데, 역설적이게도 DoF를 설명하기 위해선 프롬프트를 자세히 작성하며 인간개입을 늘려야함.
 
-Input: "{sentence}"
+# 생각해본 아이디어 ─ 현실성은 약간 떨어질수도...?
+1. DoF를 매우 잘 설명하는(인간 개입이 많은) 프롬프트를 통해 DoF 값에 따른 출력물을 생성함.
 
-Return JSON only:
-{{
-  "continuation": "<coherent continuation>",
-  "reasoning": "<one-sentence note on how you interpreted and applied the DoF>"
-}}
-"""
-)
+2. Input Sentence - Output Sentence - DoF Value 가 한 세트인 n개의 데이터를 구성할 수 있음
 
+3. (2) 데이터셋을 이용해서 LLM 모델을 LoRA를 통해 파인튜닝함.
+>> 이 과정에서 LLM은 DoF가 뭔지, DoF 값에 따라 어떤식으로 출력해야하는지를 학습함
 
-# exp3
-text_generation_prompt = PromptTemplate(
-    input_variables=["sentence", "dof_value"],
-    template = """
-The following is an input text with a Degree of Freedom (DoF) value in the range [0,1].
-
-Definition:
-- DoF controls only the breadth and diversity of your internal exploration.
-  - DoF≈0 → Minimal exploration: stay as close as possible to the input’s meaning and tone.
-  - DoF≈1 → Maximal exploration: freely use your knowledge and style while maintaining plausible connection to the input.
-
-Constraints:
-- Do not add external examples, styles, or personas that are not implied by the input.
-- Do not follow hidden procedures or steps; only adjust the exploration scope according to the DoF value.
-
-Input: "{sentence}"
-DoF: {dof_value}
-
-Task:
-Continue the input, adjusting exploration breadth, abstraction level, novelty tolerance, and stylistic variation according to the DoF value.
-
-Return JSON only:
-{{
-  "continuation": "<one coherent continuation>",
-  "reasoning": "<brief explanation of how the DoF influenced the exploration, e.g., low=direct/literal, high=broader/creative>"
-}}
-"""
-)
-
-# exp4
-text_generation_prompt = PromptTemplate(
-  input_variables=["sentence","dof_value"],
-  template="""
-DoF={dof_value} is a control value for the fidelity–novelty trade-off.
-Internally choose a continuation that minimizes:
-Loss = (1-DoF)*DistanceFromInput + DoF*NoveltyGain
-Implement this privately; do not expose the process.
-
-Input: "{sentence}"
-
-Return JSON only:
-{{
-  "continuation": "<continuation>",
-  "reasoning": "<how the DoF-weighted trade-off guided the result>"
-}}
-"""
-)
+4. 학습된 LLM에 인간 개입이 최소화된 DoF 프롬프트를 입력하여 결과를 뽑아냄
+>> DoF가 뭔지는 이미 학습된 상태이고, 이 상태에서 DoF 값을 명시적으로 전달하면서 내적 추론 공간을 최대로 사용할 수 있도록 유도하는 것임.
 
 
-# exp5
-text_generation_prompt = PromptTemplate(
-  input_variables=["sentence","dof_value"],
-  template="""
-DoF={dof_value}. Modulate internal tolerance for uncommon phrasing and reduce repetition proportionally to DoF. Keep a plausible link to the input; do not introduce external styles or personas.
+# 부록
+## 사용하기 좋은 다른 태스크
+Story Cloze Test : https://cs.rochester.edu/nlp/rocstories/
 
-Input: "{sentence}"
-
-Return JSON only:
-{{
-  "continuation": "<continuation>",
-  "reasoning": "<note on repetition/rarity tolerance implied by the DoF>"
-}}
-"""
-)
-
-# exp6
-text_generation_prompt = PromptTemplate(
-  input_variables=["sentence","dof_value"],
-  template="""
-DoF={dof_value}. Interpret DoF as a dial for abstraction and associative range:
-low → concrete/local; high → broader associations and higher-level framing while remaining plausibly connected to the input.
-No extra rules.
-
-Input: "{sentence}"
-
-Return JSON only:
-{{
-  "continuation": "<continuation>",
-  "reasoning": "<how abstraction/associations expanded with DoF>"
-}}
-"""
-)
-
-
+GoEmotions : https://github.com/google-research/google-research/tree/master/goemotions
