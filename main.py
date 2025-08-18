@@ -36,7 +36,6 @@ USE_MODEL: Dict[str, Dict[str, Dict[str, float | int]]] = {
     }
 }
 
-# ---------------- I/O utils ----------------
 def initialize_llm(model_type: str, model_name: str):
     if model_type != "gemini":
         raise ValueError(f"Only 'gemini' is supported in this script. Got: {model_type}")
@@ -53,11 +52,7 @@ def load_dataset(
     target_ids: Optional[List[int]] = None,
     seed: int = 42
 ) -> pd.DataFrame:
-    """
-    - sample_size가 주어지면 random_state=seed로 재현 가능한 샘플링 수행
-    - 샘플링 후 index 오름차순 정렬로 순서를 고정
-    - target_ids가 주어지면 해당 index만 선택 (이 경우도 정렬 유지)
-    """
+
     data_path = DATA_PATHS[dataset_name]
     if not data_path.exists():
         raise FileNotFoundError(f"Dataset not found: {data_path}")
@@ -89,7 +84,6 @@ def get_prompt_name(prompt_file: str) -> str:
     """exp6.tmpl -> exp6  /  my_prompt.txt -> my_prompt"""
     return Path(prompt_file).stem
 
-# ---------------- resume helpers ----------------
 def key_of(index: int, dof_value: float, sample_id: int) -> Tuple[int, str, int]:
     """정확한 매칭을 위해 DoF를 고정 소수(6) 문자열로 보관."""
     return (int(index), f"{float(dof_value):.6f}", int(sample_id))
@@ -98,10 +92,6 @@ def parse_result_key(obj: Dict[str, Any]) -> Tuple[int, str, int]:
     return key_of(int(obj["index"]), float(obj["dof_value"]), int(obj["sample_id"]))
 
 def load_existing_results(jsonl_path: Path) -> Tuple[Dict[Tuple[int,str,int], Dict[str,Any]], set, set]:
-    """
-    기존 JSONL을 읽어 전체 map과 성공/오류 key 집합을 반환.
-    성공 판단: error 필드가 비어있고(또는 없음) + continuation이 비어있지 않음.
-    """
     results_map: Dict[Tuple[int,str,int], Dict[str,Any]] = {}
     success_keys, error_keys = set(), set()
 
@@ -125,16 +115,13 @@ def load_existing_results(jsonl_path: Path) -> Tuple[Dict[Tuple[int,str,int], Di
                 if isinstance(cont, str) and cont.strip() != "":
                     success_keys.add(k)
                 else:
-                    # 내용 없음은 오류로 취급
                     error_keys.add(k)
             else:
                 error_keys.add(k)
 
     return results_map, success_keys, error_keys
 
-# ---------------- chain builder & preview ----------------
 def _build_chain(model_type: str, model_name: str, prompt_text: str):
-    """Create LLM chain: PromptTemplate -> LLM -> JSON parser"""
     llm = initialize_llm(model_type, model_name)
     prompt = PromptTemplate.from_template(prompt_text)
     parser = JsonOutputParser()
@@ -142,11 +129,10 @@ def _build_chain(model_type: str, model_name: str, prompt_text: str):
     return chain, prompt
 
 def render_preview(prompt: PromptTemplate, sentence: str, dof_value: float, prompt_text: str) -> str:
-    """실제 모델에 들어갈 최종 텍스트(포맷된 프롬프트) 미리보기"""
     use_nonce = "{nonce}" in prompt_text
     kwargs = {"sentence": sentence, "dof_value": dof_value}
     if use_nonce:
-        kwargs["nonce"] = 123456789  # 미리보기용 고정 nonce
+        kwargs["nonce"] = 123456789  
     return prompt.format(**kwargs)
 
 # ---------------- worker (item-level) ----------------
@@ -157,14 +143,12 @@ def worker_process_batch(args):
     """
     (batch_items, model_type, model_name, prompt_text, prompt_name, seed) = args
 
-    # Worker ID (1..num_processes) -> 진행바 position
     try:
         wid = current_process()._identity[0]
     except Exception:
         wid = 1
     wid_pos = wid if wid >= 1 else 1
 
-    # 워커별 결정적 난수
     random.seed(seed + wid_pos)
 
     chain, _ = _build_chain(model_type, model_name, prompt_text)
@@ -186,7 +170,6 @@ def worker_process_batch(args):
 
         retry = 0
         last_err = None
-        # 여기서 "최대 5회까지 해당 항목만 재시도" 보장
         while retry < 5:
             try:
                 res = chain.invoke(payload)
@@ -222,7 +205,6 @@ def worker_process_batch(args):
     pbar.close()
     return out
 
-# ---------------- runner ----------------
 def run_experiment(
     model_type: str,
     model_name: str,
@@ -243,7 +225,6 @@ def run_experiment(
     rerun_errors_only: bool = False,
     output_path: Optional[Path] = None
 ):
-    # 전역 재현성
     os.environ["PYTHONHASHSEED"] = str(seed)
     random.seed(seed)
 
@@ -263,7 +244,6 @@ def run_experiment(
     df = load_dataset(dataset_name, sample_size, target_ids, seed=seed)
     print(f"Loaded {len(df)} sentences")
 
-    # [Optional] Preview
     if preview:
         if not (0 <= preview_sentence_index < len(df)):
             preview_sentence_index = 0
@@ -278,7 +258,6 @@ def run_experiment(
         print("===== /PREVIEW =====================================\n")
 
     print("[2/5] Building work items...")
-    # 전체 아이템: 문장 × DoF × sample_id
     items: List[Tuple[int, str, float, int]] = []
     for idx, row in df.iterrows():
         s = row["sentence"]
@@ -286,7 +265,6 @@ def run_experiment(
             for k in range(n_per_dof):
                 items.append((int(idx), s, float(d), int(k)))
 
-    # Resume 모드 처리
     existing_map = {}
     success_keys = set()
     error_keys = set()
@@ -296,10 +274,8 @@ def run_experiment(
         existing_map, success_keys, error_keys = load_existing_results(Path(resume_from))
 
         if rerun_errors_only:
-            # 오류난 key만 재실행
             items = [it for it in items if key_of(it[0], it[2], it[3]) in error_keys]
         else:
-            # 성공 제외(오류 + 누락)만 재실행
             done = success_keys
             items = [it for it in items if key_of(it[0], it[2], it[3]) not in done]
 
@@ -310,20 +286,18 @@ def run_experiment(
         print(f"[i] Existing file entries: {len(existing_map)}  (success: {len(success_keys)}, errors: {len(error_keys)})")
     print(f"[i] Pending items to run:   {total_pending}")
 
-    # 출력 경로 구성
     if output_path:
         final_jsonl_path = Path(output_path)
         ensure_dir(final_jsonl_path.parent)
     else:
         if resume_from:
-            final_jsonl_path = Path(resume_from)  # 덮어쓰기(원자적 교체)
+            final_jsonl_path = Path(resume_from)  
         else:
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             out_dir = RESULTS_BASE / model_type / model_name
             ensure_dir(out_dir)
             final_jsonl_path = out_dir / f"{model_type}_{model_name}_{dataset_name}_prompt-{prompt_name}_DoF_multi_{timestamp}.jsonl"
 
-    # 메타 파일 경로
     meta_path = final_jsonl_path.with_suffix(".meta.json")
 
     print("[3/5] Saving meta (initial snapshot)...")
@@ -374,20 +348,16 @@ def run_experiment(
                 total_written += len(batch_result)
 
     print("\n[5/5] Consolidating & writing results...")
-    # 기존 map에 신규 결과 덮어쓰기(동일 key 교체)
     if resume_from:
         for obj in new_results:
             existing_map[parse_result_key(obj)] = obj
-        # 안정된 정렬( index, dof_str, sample_id )
         all_items_sorted = sorted(existing_map.items(), key=lambda kv: (kv[0][0], kv[0][1], kv[0][2]))
-        # 원자적 교체를 위해 tmp 파일로 쓴 뒤 교체
         tmp_path = final_jsonl_path.with_suffix(final_jsonl_path.suffix + ".tmp")
         with open(tmp_path, "w", encoding="utf-8") as fout:
             for _, obj in all_items_sorted:
                 fout.write(json.dumps(obj, ensure_ascii=False) + "\n")
         os.replace(tmp_path, final_jsonl_path)
     else:
-        # 신규 실행이면 스트리밍이 아니라 한 번에 기록
         ensure_dir(final_jsonl_path.parent)
         with open(final_jsonl_path, "w", encoding="utf-8") as fout:
             for obj in new_results:
@@ -402,7 +372,6 @@ def run_experiment(
         print(f"Expected: {total_expected}")
     return str(final_jsonl_path)
 
-# ---------------- CLI ----------------
 def parse_args():
     p = argparse.ArgumentParser(
         description="DoF multi-sample generator (API-only, external prompt file, JSONL streaming, prompt-aware filenames, preview, reproducible sampling, resume)"
@@ -427,10 +396,8 @@ def parse_args():
     p.add_argument("--preview-sentence-index", type=int, default=0, help="Row index in df (after sampling) to preview")
     p.add_argument("--preview-dof-index", type=int, default=0, help="Index into --dofs list to preview")
 
-    # 재현성 보장용 시드
     p.add_argument("--seed", type=int, default=42, help="Random seed for reproducible input sampling and nonce generation")
 
-    # Resume & Output
     p.add_argument("--resume-from", type=str, help="Path to an existing JSONL to resume (run only missing or failed items)")
     p.add_argument("--rerun-errors-only", action="store_true", help="When resuming, re-run only rows that had non-empty error")
     p.add_argument("--output", type=str, help="Optional explicit JSONL output path. If omitted and --resume-from is set, the original file is overwritten atomically; otherwise a timestamped file is created.")

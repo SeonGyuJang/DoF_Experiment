@@ -11,9 +11,6 @@ from tqdm import tqdm
 import matplotlib.pyplot as plt
 import seaborn as sns
 
-# ----------------------------
-# Optional: Hugging Face (for perplexity with a pretrained LM)
-# ----------------------------
 _HF_AVAILABLE = True
 try:
     from transformers import AutoTokenizer, AutoModelForCausalLM
@@ -21,9 +18,6 @@ try:
 except Exception:
     _HF_AVAILABLE = False
 
-# ----------------------------
-# Simple English stopword list (for Lexical Density, not in the final metric set but kept for completeness)
-# ----------------------------
 STOPWORDS = set("""
 a an the and or but if while of in on at by for to from with without within about across after before during between
 is am are was were be been being do does did doing have has had having can could may might must shall should will would
@@ -31,9 +25,6 @@ i you he she it we they me him her us them my your his hers its our their mine y
 as not no nor so than too very just only also into over under again further then once here there when where why how
 """.split())
 
-# ----------------------------
-# Tokenization & helpers
-# ----------------------------
 def word_tokens(text: str) -> List[str]:
     tokens = []
     cur = []
@@ -65,9 +56,6 @@ def ngrams(tokens: List[str], n: int) -> List[Tuple[str, ...]]:
         return []
     return [tuple(tokens[i:i+n]) for i in range(len(tokens)-n+1)]
 
-# ----------------------------
-# Metrics (Top-tier set)
-# ----------------------------
 def mtld(tokens: List[str], ttr_threshold: float = 0.72, min_seg: int = 10) -> float:
     def _mtld_one(seq: List[str]) -> float:
         types = set()
@@ -133,8 +121,6 @@ def distinct_n(tokens: List[str], n: int) -> float:
         return 0.0
     return float(len(set(ng)) / total)
 
-# ---------- Perplexity ----------
-# (A) HF-based perplexity with a pretrained causal LM (preferred)
 class HFPerplexity:
     def __init__(self, model_name: str = "gpt2", device: Optional[str] = None, max_len: int = 512):
         if not _HF_AVAILABLE:
@@ -150,25 +136,20 @@ class HFPerplexity:
 
     @torch.no_grad()
     def perplexity(self, text: str) -> float:
-        # Truncate long texts to avoid memory blowups; consistent across samples
         enc = self.tokenizer(text, return_tensors="pt", truncation=True, max_length=self.max_len)
         input_ids = enc["input_ids"].to(self.device)
         attn = enc["attention_mask"].to(self.device)
-        # Shifted LM loss
         outputs = self.model(input_ids=input_ids, attention_mask=attn, labels=input_ids)
         loss = outputs.loss.item()
         ppl = float(math.exp(loss))
         return ppl
 
-# (B) Unigram-smoothed perplexity (fallback, length-normalized cross-entropy)
 def build_unigram_model(corpus_tokens: List[List[str]], alpha: float = 1.0) -> Dict[str, float]:
-    # Add-one (Laplace) smoothing
     counts = Counter()
     for toks in corpus_tokens:
         counts.update(toks)
     V = len(counts)
     N = sum(counts.values())
-    # Return smoothed probability dict with default to alpha/(N+alpha*V)
     base = alpha / (N + alpha * V) if (N + alpha * V) > 0 else 0.0
     probs = {w: (counts[w] + alpha) / (N + alpha * V) for w in counts}
     probs["<UNK>"] = base
@@ -184,14 +165,8 @@ def unigram_perplexity(tokens: List[str], probs: Dict[str, float]) -> float:
     xent = ll / len(tokens)
     return float(math.exp(xent))
 
-# ----------------------------
-# Metric registry
-# ----------------------------
 TT_METRICS = ["MTLD", "HDD", "NormEntropy", "Perplexity", "Distinct1", "Distinct2", "MSL"]
 
-# ----------------------------
-# IO
-# ----------------------------
 def load_jsonl_rows(input_dir: Path) -> pd.DataFrame:
     files = sorted([p for p in input_dir.glob("*.jsonl") if p.is_file()])
     rows = []
@@ -220,9 +195,6 @@ def load_jsonl_rows(input_dir: Path) -> pd.DataFrame:
         raise RuntimeError("No valid rows found.")
     return pd.DataFrame(rows)
 
-# ----------------------------
-# Metric computation
-# ----------------------------
 def compute_metrics_per_sample(
     df: pd.DataFrame,
     ppl_model_name: Optional[str] = None,
@@ -230,7 +202,6 @@ def compute_metrics_per_sample(
     unigram_alpha: float = 1.0,
     show_progress: bool = True
 ) -> pd.DataFrame:
-    # Prepare optional HF PPL
     hf_ppl = None
     if ppl_model_name:
         if not _HF_AVAILABLE:
@@ -242,7 +213,6 @@ def compute_metrics_per_sample(
             except Exception as e:
                 print(f"[WARN] Failed to init HF model ({e}); fallback to unigram perplexity.")
 
-    # If unigram PPL is needed, build from entire corpus (leave-one-out is expensive; corpus model is common fallback)
     all_tokens = [word_tokens(t) for t in df["continuation"].tolist()]
     unigram_probs = build_unigram_model(all_tokens, alpha=unigram_alpha)
 
@@ -254,7 +224,6 @@ def compute_metrics_per_sample(
         txt = row["continuation"]
         toks = word_tokens(txt)
 
-        # MTLD / HDD / Entropy / Distinct-n / MSL
         try: metrics["MTLD"].append(mtld(toks))
         except Exception: metrics["MTLD"].append(np.nan)
 
@@ -287,9 +256,6 @@ def compute_metrics_per_sample(
         df[k] = v
     return df
 
-# ----------------------------
-# Plotting (Violin+box+points, ECDF, Mean±CI line)
-# ----------------------------
 def plot_violin_box_points(df: pd.DataFrame, out_dir: Path, downsample: Optional[int] = 1000):
     sns.set(style="whitegrid")
     dof_order = sorted(df["dof_value"].unique())
@@ -299,7 +265,6 @@ def plot_violin_box_points(df: pd.DataFrame, out_dir: Path, downsample: Optional
     for metric in metric_cols:
         plot_df = df[["dof_value", metric]].dropna().copy()
 
-        # Downsample points per DoF to avoid overplotting
         if downsample is not None and downsample > 0:
             sampled = []
             for d in dof_order:
@@ -389,9 +354,6 @@ def plot_mean_ci(df: pd.DataFrame, out_dir: Path, ci: int = 95):
         plt.savefig(out_path, dpi=220)
         plt.close()
 
-# ----------------------------
-# Main
-# ----------------------------
 def main():
     ap = argparse.ArgumentParser(description="Top-tier metric evaluation (MTLD, HDD, Entropy, Perplexity, Distinct-n, MSL) with plots.")
     ap.add_argument("--input-dir", required=True, help="Directory with .jsonl files")
@@ -399,7 +361,6 @@ def main():
     ap.add_argument("--plots", choices=["violin", "ecdf", "meanci", "all"], default="all",
                     help="Which plots to generate")
     ap.add_argument("--downsample", type=int, default=1000, help="Max points per DoF for scatter overlay")
-    # Perplexity options
     ap.add_argument("--ppl-model", default=None,
                     help="HF model name for perplexity (e.g., gpt2). If omitted or unavailable, uses unigram PPL.")
     ap.add_argument("--ppl-max-len", type=int, default=512, help="Max tokens for HF model perplexity")
