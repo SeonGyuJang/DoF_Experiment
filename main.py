@@ -1,4 +1,14 @@
-# python main.py --model gemini --model-name gemini-2.0-flash --dataset train --sample 1000 --dofs 0.0,0.5,1.0 --n-per-dof 10 --num-processes 8 --batch-size 4 --prompt-file prompts/exp1.tmpl --preview
+# python main.py \
+#   --model gemini \
+#   --model-name gemini-2.0-flash \
+#   --dataset train \
+#   --sample 1000 \
+#   --dofs 0.0,0.5,1.0 \
+#   --n-per-dof 10 \
+#   --num-processes 4 \
+#   --batch-size 2 \
+#   --prompt-file /Users/jangseongyu/Documents/GitHub/DoF_Experiment/prompts/exp3.tmpl \
+#   --preview
 
 import argparse
 import json
@@ -21,9 +31,8 @@ load_dotenv()
 
 BASE = Path(__file__).resolve().parent
 DATA_PATHS: Dict[str, Path] = {
-    "train": Path(r"C:\Users\dsng3\Documents\GitHub\DoF_Experiment\data\train-00000-of-00001.parquet"),
-    "validation": Path(r"C:\Users\dsng3\Documents\GitHub\DoF_Experiment\data\validation-00000-of-00001.parquet"),
-    "test": Path(r"C:\Users\dsng3\Documents\GitHub\DoF_Experiment\data\test-00000-of-00001.parquet")
+    "train": Path("/Users/jangseongyu/Documents/GitHub/DoF_Experiment/data/train-00000-of-00001.parquet"),
+    "test": Path("/Users/jangseongyu/Documents/GitHub/DoF_Experiment/data/test-00000-of-00001.parquet")
 }
 RESULTS_BASE = BASE / "results"
 
@@ -57,6 +66,13 @@ def load_dataset(
     if not data_path.exists():
         raise FileNotFoundError(f"Dataset not found: {data_path}")
     df = pd.read_parquet(data_path)
+
+    # Expect 'text' column (dataset 변경 반영)
+    if "text" not in df.columns:
+        raise KeyError(
+            "Input dataset must contain a 'text' column. "
+            f"Columns found: {list(df.columns)}"
+        )
 
     if target_ids:
         df = df[df.index.isin(target_ids)]
@@ -128,18 +144,22 @@ def _build_chain(model_type: str, model_name: str, prompt_text: str):
     chain = prompt | llm | parser
     return chain, prompt
 
-def render_preview(prompt: PromptTemplate, sentence: str, dof_value: float, prompt_text: str) -> str:
+def render_preview(prompt: PromptTemplate, text_value: str, dof_value: float, prompt_text: str) -> str:
+    """
+    템플릿은 여전히 {sentence} 플레이스홀더를 쓴다고 가정하고,
+    내부적으로 'text' 값을 'sentence' 키로 넘김.
+    """
     use_nonce = "{nonce}" in prompt_text
-    kwargs = {"sentence": sentence, "dof_value": dof_value}
+    kwargs = {"sentence": text_value, "dof_value": dof_value}
     if use_nonce:
-        kwargs["nonce"] = 123456789  
+        kwargs["nonce"] = 123456789
     return prompt.format(**kwargs)
 
 # ---------------- worker (item-level) ----------------
 def worker_process_batch(args):
     """
     args: (batch_items, model_type, model_name, prompt_text, prompt_name, seed)
-    batch_items: List[Tuple[int, str, float, int]]  -> (index, sentence, dof_value, sample_id)
+    batch_items: List[Tuple[int, str, float, int]]  -> (index, text_value, dof_value, sample_id)
     """
     (batch_items, model_type, model_name, prompt_text, prompt_name, seed) = args
 
@@ -163,8 +183,8 @@ def worker_process_batch(args):
 
     use_nonce = "{nonce}" in prompt_text
 
-    for idx, sentence, dof, sample_id in batch_items:
-        payload = {"sentence": sentence, "dof_value": dof}
+    for idx, text_value, dof, sample_id in batch_items:
+        payload = {"sentence": text_value, "dof_value": dof}
         if use_nonce:
             payload["nonce"] = random.getrandbits(64)
 
@@ -175,7 +195,7 @@ def worker_process_batch(args):
                 res = chain.invoke(payload)
                 out.append({
                     "index": idx,
-                    "original_sentence": sentence,
+                    "original_text": text_value,
                     "dof_value": dof,
                     "sample_id": sample_id,
                     "prompt_name": prompt_name,
@@ -191,7 +211,7 @@ def worker_process_batch(args):
         if retry >= 5:
             out.append({
                 "index": idx,
-                "original_sentence": sentence,
+                "original_text": text_value,
                 "dof_value": dof,
                 "sample_id": sample_id,
                 "prompt_name": prompt_name,
@@ -242,17 +262,17 @@ def run_experiment(
 
     print("[1/5] Loading dataset...")
     df = load_dataset(dataset_name, sample_size, target_ids, seed=seed)
-    print(f"Loaded {len(df)} sentences")
+    print(f"Loaded {len(df)} rows (expects 'text' column).")
 
     if preview:
         if not (0 <= preview_sentence_index < len(df)):
             preview_sentence_index = 0
         if not (0 <= preview_dof_index < len(dofs)):
             preview_dof_index = 0
-        sentence = df.iloc[preview_sentence_index]["sentence"]
+        text_value = df.iloc[preview_sentence_index]["text"]
         dof_val = dofs[preview_dof_index]
         _, prompt_obj = _build_chain(model_type, model_name, prompt_text)
-        rendered = render_preview(prompt_obj, sentence, dof_val, prompt_text)
+        rendered = render_preview(prompt_obj, text_value, dof_val, prompt_text)
         print("\n[PREVIEW] ===== Rendered Prompt Sent to Gemini =====")
         print(rendered)
         print("===== /PREVIEW =====================================\n")
@@ -260,11 +280,12 @@ def run_experiment(
     print("[2/5] Building work items...")
     items: List[Tuple[int, str, float, int]] = []
     for idx, row in df.iterrows():
-        s = row["sentence"]
+        text_value = row["text"]
         for d in dofs:
             for k in range(n_per_dof):
-                items.append((int(idx), s, float(d), int(k)))
+                items.append((int(idx), str(text_value), float(d), int(k)))
 
+    # ---- Resume support: 미리 기존 결과 읽고 완료/에러 키 집합 구성
     existing_map = {}
     success_keys = set()
     error_keys = set()
@@ -272,7 +293,6 @@ def run_experiment(
         if not Path(resume_from).exists():
             raise FileNotFoundError(f"--resume-from not found: {resume_from}")
         existing_map, success_keys, error_keys = load_existing_results(Path(resume_from))
-
         if rerun_errors_only:
             items = [it for it in items if key_of(it[0], it[2], it[3]) in error_keys]
         else:
@@ -286,12 +306,13 @@ def run_experiment(
         print(f"[i] Existing file entries: {len(existing_map)}  (success: {len(success_keys)}, errors: {len(error_keys)})")
     print(f"[i] Pending items to run:   {total_pending}")
 
+    # ---- Output path 결정
     if output_path:
         final_jsonl_path = Path(output_path)
         ensure_dir(final_jsonl_path.parent)
     else:
         if resume_from:
-            final_jsonl_path = Path(resume_from)  
+            final_jsonl_path = Path(resume_from)  # 이어쓰기
         else:
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             out_dir = RESULTS_BASE / model_type / model_name
@@ -307,7 +328,7 @@ def run_experiment(
         "dataset": dataset_name,
         "dofs": dofs,
         "n_per_dof": n_per_dof,
-        "num_input_sentences": int(len(df)),
+        "num_input_rows": int(len(df)),
         "total_expected_outputs": int(total_expected),
         "batch_size_items": batch_size,
         "num_processes": num_processes,
@@ -325,71 +346,67 @@ def run_experiment(
     print(f"[i] Meta saved: {meta_path}")
 
     print("[4/5] Parallel generation (item-level) ...")
-    new_results: List[Dict[str, Any]] = []
-    total_written = 0
+    new_results_count = 0
 
-    if total_pending > 0:
-        task_batches = list(chunk_list(items, batch_size))
-        with Pool(processes=num_processes) as pool:
-            for batch_result in tqdm(
-                pool.imap_unordered(
-                    worker_process_batch,
-                    [
-                        (batch, model_type, model_name, prompt_text, prompt_name, seed)
-                        for batch in task_batches
-                    ]
-                ),
-                total=len(task_batches),
-                desc="Generating (batches)",
-                position=0,
-                leave=True
-            ):
-                new_results.extend(batch_result)
-                total_written += len(batch_result)
+    # ---- 파일을 미리 열어두고 배치 결과를 즉시 append (실시간 쓰기)
+    # resume면 append('a'), 신규면 write('w')
+    open_mode = "a" if final_jsonl_path.exists() else "w"
+    with open(final_jsonl_path, open_mode, encoding="utf-8") as fout:
+        if total_pending > 0:
+            task_batches = list(chunk_list(items, batch_size))
+            with Pool(processes=num_processes) as pool:
+                for batch_result in tqdm(
+                    pool.imap_unordered(
+                        worker_process_batch,
+                        [
+                            (batch, model_type, model_name, prompt_text, prompt_name, seed)
+                            for batch in task_batches
+                        ]
+                    ),
+                    total=len(task_batches),
+                    desc="Generating (batches)",
+                    position=0,
+                    leave=True
+                ):
+                    # ---- 여기서 실시간으로 한 줄씩 기록
+                    for obj in batch_result:
+                        fout.write(json.dumps(obj, ensure_ascii=False) + "\n")
+                    fout.flush()           # OS 버퍼 flush
+                    try:
+                        os.fsync(fout.fileno())  # 디스크 sync (가능한 경우)
+                    except OSError:
+                        pass
+                    new_results_count += len(batch_result)
 
-    print("\n[5/5] Consolidating & writing results...")
-    if resume_from:
-        for obj in new_results:
-            existing_map[parse_result_key(obj)] = obj
-        all_items_sorted = sorted(existing_map.items(), key=lambda kv: (kv[0][0], kv[0][1], kv[0][2]))
-        tmp_path = final_jsonl_path.with_suffix(final_jsonl_path.suffix + ".tmp")
-        with open(tmp_path, "w", encoding="utf-8") as fout:
-            for _, obj in all_items_sorted:
-                fout.write(json.dumps(obj, ensure_ascii=False) + "\n")
-        os.replace(tmp_path, final_jsonl_path)
-    else:
-        ensure_dir(final_jsonl_path.parent)
-        with open(final_jsonl_path, "w", encoding="utf-8") as fout:
-            for obj in new_results:
-                fout.write(json.dumps(obj, ensure_ascii=False) + "\n")
-
+    print("\n[5/5] Finalize...")
     print("\n[✓] Done.")
     print(f"Output JSONL: {final_jsonl_path}")
-    print(f"New lines written this run: {total_written}")
+    print(f"New lines written this run: {new_results_count}")
     if resume_from:
-        print(f"Total lines in consolidated file: {len(existing_map)}")
+        print(f"(Resumed) Existing entries previously in file: {len(existing_map)}")
     else:
-        print(f"Expected: {total_expected}")
+        print(f"Expected total for this run: {total_pending}")
+
     return str(final_jsonl_path)
 
 def parse_args():
     p = argparse.ArgumentParser(
-        description="DoF multi-sample generator (API-only, external prompt file, JSONL streaming, prompt-aware filenames, preview, reproducible sampling, resume)"
+        description="DoF multi-sample generator (API-only, external prompt file, JSONL streaming (real-time writes), prompt-aware filenames, preview, reproducible sampling, resume)"
     )
     p.add_argument("--model", choices=list(USE_MODEL.keys()), required=True)
     p.add_argument("--model-name", required=True)
-    p.add_argument("--dataset", choices=["train","validation","test"], required=True)
+    p.add_argument("--dataset", choices=["train","test"], required=True)
 
     grp = p.add_mutually_exclusive_group(required=True)
-    grp.add_argument("--all", action="store_true", help="Use all sentences in dataset")
-    grp.add_argument("--sample", type=int, help="Number of sentences to sample")
+    grp.add_argument("--all", action="store_true", help="Use all rows in dataset")
+    grp.add_argument("--sample", type=int, help="Number of rows to sample")
     grp.add_argument("--ids", type=str, help="Comma-separated list of index IDs")
 
     p.add_argument("--dofs", type=str, required=True, help='Comma-separated DoF list, e.g. "0.0,0.5,1.0"')
-    p.add_argument("--n-per-dof", type=int, default=30, help="How many samples per DoF for each sentence")
+    p.add_argument("--n-per-dof", type=int, default=30, help="How many samples per DoF for each row")
 
     p.add_argument("--num-processes", type=int, default=8)
-    p.add_argument("--batch-size", type=int, default=2, help="Batch size in ITEMS (sentence×DoF×sample_id)")
+    p.add_argument("--batch-size", type=int, default=2, help="Batch size in ITEMS (row×DoF×sample_id)")
 
     p.add_argument("--prompt-file", type=str, required=True, help="Path to external prompt template (.txt/.tmpl)")
     p.add_argument("--preview", action="store_true", help="Print a rendered prompt preview before running")
@@ -400,7 +417,7 @@ def parse_args():
 
     p.add_argument("--resume-from", type=str, help="Path to an existing JSONL to resume (run only missing or failed items)")
     p.add_argument("--rerun-errors-only", action="store_true", help="When resuming, re-run only rows that had non-empty error")
-    p.add_argument("--output", type=str, help="Optional explicit JSONL output path. If omitted and --resume-from is set, the original file is overwritten atomically; otherwise a timestamped file is created.")
+    p.add_argument("--output", type=str, help="Optional explicit JSONL output path. If omitted and --resume-from is set, we append to that file; otherwise a timestamped file is created.")
     return p.parse_args()
 
 def main():
