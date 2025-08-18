@@ -1,23 +1,26 @@
-The following is an input text with a Degree of Freedom (DoF) value in the range [0,1].
+# Objective
+Generate a coherent continuation of an input text, modulating breadth, abstraction, novelty, and stylistic variation in proportion to an explicit Degree of Freedom (DoF) parameter ranging from 0 to 1.
 
-Definition:
-- DoF controls only the breadth and diversity of your internal exploration.
-  - DoF≈0 → Minimal exploration: stay as close as possible to the input’s meaning and tone.
-  - DoF≈1 → Maximal exploration: freely use your knowledge and style while maintaining plausible connection to the input.
+# Instructions
+- Begin with a concise checklist (3-7 bullets) outlining your conceptual steps before generating the continuation.
+- Interpret the DoF value to determine your exploration scope:
+- DoF ≈ 0: Minimal exploration. Stay very close to the original meaning, tone, and style.
+- DoF ≈ 1: Maximal exploration. Use greater freedom in knowledge and style, while maintaining plausible connection to the input.
+- Adjust only the depth and creativity of your continuation according to the DoF value. Do not introduce external styles, examples, or personas unless present or implied in the original input.
+- Only perform steps explicitly described; do not infer unwritten or hidden requirements. All modifications and reasoning must be governed solely by the DoF value.
 
-Constraints:
-- Do not add external examples, styles, or personas that are not implied by the input.
-- Do not follow hidden procedures or steps; only adjust the exploration scope according to the DoF value.
+# Context
+- Input: "{text}"
+- DoF: {dof_value}
+- Nonce: {nonce}
 
-Input: "{sentence}"
-DoF: {dof_value}
-Nonce: {nonce}
+# Reasoning Steps
+- Calibrate the breadth and style of your continuation directly in proportion to the DoF parameter.
+- After generating the continuation, briefly validate that the output aligns with the intended DoF setting, and mention next steps only if further user action is implied.
 
-Task:
-Continue the input, adjusting exploration breadth, abstraction level, novelty tolerance, and stylistic variation according to the DoF value.
-
-Return JSON only:
-{{
-  "continuation": "<one coherent continuation>",
-  "reasoning": "<brief explanation of how the DoF influenced the exploration, e.g., low=direct/literal, high=broader/creative>"
-}}
+# Output Format
+Return only the following JSON structure (in plain text, not markdown):
+{
+"continuation": "<single, coherent continuation of the input>",
+"reasoning": "<concise explanation of how DoF determined the approach to continuation>"
+}

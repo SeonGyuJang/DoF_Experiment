@@ -31,8 +31,8 @@ load_dotenv()
 
 BASE = Path(__file__).resolve().parent
 DATA_PATHS: Dict[str, Path] = {
-    "train": Path("/Users/jangseongyu/Documents/GitHub/DoF_Experiment/data/train-00000-of-00001.parquet"),
-    "test": Path("/Users/jangseongyu/Documents/GitHub/DoF_Experiment/data/test-00000-of-00001.parquet")
+    "train": Path(r"C:\Users\dsng3\Documents\GitHub\DoF_Experiment\data\train-00000-of-00001.parquet"),
+    "test": Path(r"C:\Users\dsng3\Documents\GitHub\DoF_Experiment\data\test-00000-of-00001.parquet")
 }
 RESULTS_BASE = BASE / "results"
 
