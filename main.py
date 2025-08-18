@@ -7,8 +7,10 @@
 #   --n-per-dof 10 \
 #   --num-processes 4 \
 #   --batch-size 2 \
-#   --prompt-file /Users/jangseongyu/Documents/GitHub/DoF_Experiment/prompts/exp3.tmpl \
+#   --prompt-file C:\Users\dsng3\Documents\GitHub\DoF_Experiment\prompts\exp1.tmpl \
 #   --preview
+
+# python main.py --model gemini --model-name gemini-2.0-flash --dataset train --sample 1000 --dofs 0.0,0.5,1.0 --n-per-dof 10 --num-processes 4 --batch-size 2 --prompt-file C:\Users\dsng3\Documents\GitHub\DoF_Experiment\prompts\exp3.tmpl --preview
 
 import argparse
 import json
@@ -21,20 +23,19 @@ from datetime import datetime
 
 import pandas as pd
 from tqdm import tqdm
-from dotenv import load_dotenv
 
+from dotenv import load_dotenv, find_dotenv
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_core.prompts import PromptTemplate
 from langchain_core.output_parsers import JsonOutputParser
 
-load_dotenv()
-
 BASE = Path(__file__).resolve().parent
+RESULTS_BASE = BASE / "results"
+
 DATA_PATHS: Dict[str, Path] = {
     "train": Path(r"C:\Users\dsng3\Documents\GitHub\DoF_Experiment\data\train-00000-of-00001.parquet"),
     "test": Path(r"C:\Users\dsng3\Documents\GitHub\DoF_Experiment\data\test-00000-of-00001.parquet")
 }
-RESULTS_BASE = BASE / "results"
 
 USE_MODEL: Dict[str, Dict[str, Dict[str, float | int]]] = {
     "gemini": {
@@ -44,6 +45,74 @@ USE_MODEL: Dict[str, Dict[str, Dict[str, float | int]]] = {
         "gemini-2.5-pro": {"temperature": 1.0, "max_output_tokens": 8192}
     }
 }
+
+def ensure_dir(p: Path):
+    p.mkdir(parents=True, exist_ok=True)
+
+def chunk_list(lst, chunk_size):
+    for i in range(0, len(lst), chunk_size):
+        yield lst[i:i + chunk_size]
+
+def key_of(index: int, dof_value: float, sample_id: int) -> Tuple[int, str, int]:
+    return (int(index), f"{float(dof_value):.6f}", int(sample_id))
+
+def parse_result_key(obj: Dict[str, Any]) -> Tuple[int, str, int]:
+    return key_of(int(obj["index"]), float(obj["dof_value"]), int(obj["sample_id"]))
+
+def load_prompt_file(path: str) -> str:
+    p = Path(path)
+    if not p.exists():
+        raise FileNotFoundError(f"Prompt file not found: {p}")
+    return p.read_text(encoding="utf-8", errors="replace")
+
+def get_prompt_name(prompt_file: str) -> str:
+    return Path(prompt_file).stem
+
+def init_env():
+    loaded = load_dotenv(dotenv_path=find_dotenv(usecwd=True))
+    if not loaded:
+        load_dotenv(BASE / ".env")
+    if not os.getenv("GOOGLE_API_KEY"):
+        raise RuntimeError(
+            "GOOGLE_API_KEY not found. Ensure your .env is discoverable on Windows.\n"
+            f"cwd={os.getcwd()} base={BASE}"
+        )
+
+def load_dataset(
+    dataset_name: str,
+    sample_size: Optional[int] = None,
+    target_ids: Optional[List[int]] = None,
+    seed: int = 42
+) -> pd.DataFrame:
+    data_path = DATA_PATHS[dataset_name]
+    if not data_path.exists():
+        raise FileNotFoundError(f"Dataset not found: {data_path}")
+    try:
+        df = pd.read_parquet(data_path)
+    except Exception as e0:
+        try:
+            import pyarrow
+            df = pd.read_parquet(data_path, engine="pyarrow")
+        except Exception:
+            try:
+                import fastparquet
+                df = pd.read_parquet(data_path, engine="fastparquet")
+            except Exception:
+                raise RuntimeError(
+                    f"Failed to read parquet at {data_path}. "
+                    f"Install pyarrow or fastparquet. Original error: {repr(e0)}"
+                )
+    if "text" not in df.columns:
+        raise KeyError(
+            "Input dataset must contain a 'text' column. "
+            f"Columns found: {list(df.columns)}"
+        )
+    if target_ids:
+        df = df[df.index.isin(target_ids)]
+    if sample_size is not None and sample_size < len(df):
+        df = df.sample(n=sample_size, random_state=seed)
+    df = df.sort_index()
+    return df
 
 def initialize_llm(model_type: str, model_name: str):
     if model_type != "gemini":
@@ -55,62 +124,36 @@ def initialize_llm(model_type: str, model_name: str):
         max_output_tokens=cfg["max_output_tokens"]
     )
 
-def load_dataset(
-    dataset_name: str,
-    sample_size: Optional[int] = None,
-    target_ids: Optional[List[int]] = None,
-    seed: int = 42
-) -> pd.DataFrame:
+def _build_chain(model_type: str, model_name: str, prompt_text: str):
+    llm = initialize_llm(model_type, model_name)
+    prompt = PromptTemplate.from_template(prompt_text)
+    parser = JsonOutputParser()
+    chain = prompt | llm | parser
+    return chain, prompt
 
-    data_path = DATA_PATHS[dataset_name]
-    if not data_path.exists():
-        raise FileNotFoundError(f"Dataset not found: {data_path}")
-    df = pd.read_parquet(data_path)
+def build_payload(prompt_text: str, text_value: str, dof_value: float, nonce: Optional[int]):
+    tmpl = PromptTemplate.from_template(prompt_text)
+    vars_ = set(tmpl.input_variables)
+    payload: Dict[str, Any] = {}
+    if "text" in vars_:
+        payload["text"] = text_value
+    if "sentence" in vars_:
+        payload["sentence"] = text_value
+    if "dof_value" in vars_:
+        payload["dof_value"] = dof_value
+    if "nonce" in vars_ and nonce is not None:
+        payload["nonce"] = nonce
+    return payload
 
-    # Expect 'text' column (dataset 변경 반영)
-    if "text" not in df.columns:
-        raise KeyError(
-            "Input dataset must contain a 'text' column. "
-            f"Columns found: {list(df.columns)}"
-        )
+def render_preview(prompt: PromptTemplate, text_value: str, dof_value: float, prompt_text: str) -> str:
+    use_nonce = "{nonce}" in prompt_text
+    nonce = 123456789 if use_nonce else None
+    kwargs = build_payload(prompt_text, text_value, dof_value, nonce)
+    return prompt.format(**kwargs)
 
-    if target_ids:
-        df = df[df.index.isin(target_ids)]
-
-    if sample_size is not None and sample_size < len(df):
-        df = df.sample(n=sample_size, random_state=seed)
-
-    df = df.sort_index()
-    return df
-
-def chunk_list(lst, chunk_size):
-    for i in range(0, len(lst), chunk_size):
-        yield lst[i:i + chunk_size]
-
-def ensure_dir(p: Path):
-    p.mkdir(parents=True, exist_ok=True)
-
-def load_prompt_file(path: str) -> str:
-    p = Path(path)
-    if not p.exists():
-        raise FileNotFoundError(f"Prompt file not found: {p}")
-    return p.read_text(encoding="utf-8")
-
-def get_prompt_name(prompt_file: str) -> str:
-    """exp6.tmpl -> exp6  /  my_prompt.txt -> my_prompt"""
-    return Path(prompt_file).stem
-
-def key_of(index: int, dof_value: float, sample_id: int) -> Tuple[int, str, int]:
-    """정확한 매칭을 위해 DoF를 고정 소수(6) 문자열로 보관."""
-    return (int(index), f"{float(dof_value):.6f}", int(sample_id))
-
-def parse_result_key(obj: Dict[str, Any]) -> Tuple[int, str, int]:
-    return key_of(int(obj["index"]), float(obj["dof_value"]), int(obj["sample_id"]))
-
-def load_existing_results(jsonl_path: Path) -> Tuple[Dict[Tuple[int,str,int], Dict[str,Any]], set, set]:
-    results_map: Dict[Tuple[int,str,int], Dict[str,Any]] = {}
+def load_existing_results(jsonl_path: Path) -> Tuple[Dict[Tuple[int, str, int], Dict[str, Any]], set, set]:
+    results_map: Dict[Tuple[int, str, int], Dict[str, Any]] = {}
     success_keys, error_keys = set(), set()
-
     with open(jsonl_path, "r", encoding="utf-8") as f:
         for line in f:
             line = line.strip()
@@ -134,60 +177,28 @@ def load_existing_results(jsonl_path: Path) -> Tuple[Dict[Tuple[int,str,int], Di
                     error_keys.add(k)
             else:
                 error_keys.add(k)
-
     return results_map, success_keys, error_keys
 
-def _build_chain(model_type: str, model_name: str, prompt_text: str):
-    llm = initialize_llm(model_type, model_name)
-    prompt = PromptTemplate.from_template(prompt_text)
-    parser = JsonOutputParser()
-    chain = prompt | llm | parser
-    return chain, prompt
-
-def render_preview(prompt: PromptTemplate, text_value: str, dof_value: float, prompt_text: str) -> str:
-    """
-    템플릿은 여전히 {sentence} 플레이스홀더를 쓴다고 가정하고,
-    내부적으로 'text' 값을 'sentence' 키로 넘김.
-    """
-    use_nonce = "{nonce}" in prompt_text
-    kwargs = {"sentence": text_value, "dof_value": dof_value}
-    if use_nonce:
-        kwargs["nonce"] = 123456789
-    return prompt.format(**kwargs)
-
-# ---------------- worker (item-level) ----------------
 def worker_process_batch(args):
-    """
-    args: (batch_items, model_type, model_name, prompt_text, prompt_name, seed)
-    batch_items: List[Tuple[int, str, float, int]]  -> (index, text_value, dof_value, sample_id)
-    """
     (batch_items, model_type, model_name, prompt_text, prompt_name, seed) = args
-
     try:
         wid = current_process()._identity[0]
     except Exception:
         wid = 1
     wid_pos = wid if wid >= 1 else 1
-
     random.seed(seed + wid_pos)
-
     chain, _ = _build_chain(model_type, model_name, prompt_text)
     out: List[Dict[str, Any]] = []
-
     pbar = tqdm(
         total=len(batch_items),
         position=wid_pos,
         desc=f"P{wid_pos} | items={len(batch_items)}",
         leave=False
     )
-
     use_nonce = "{nonce}" in prompt_text
-
     for idx, text_value, dof, sample_id in batch_items:
-        payload = {"sentence": text_value, "dof_value": dof}
-        if use_nonce:
-            payload["nonce"] = random.getrandbits(64)
-
+        nonce = random.getrandbits(64) if use_nonce else None
+        payload = build_payload(prompt_text, text_value, dof, nonce)
         retry = 0
         last_err = None
         while retry < 5:
@@ -205,9 +216,8 @@ def worker_process_batch(args):
                 })
                 break
             except Exception as e:
-                last_err = str(e)
+                last_err = repr(e)
                 retry += 1
-
         if retry >= 5:
             out.append({
                 "index": idx,
@@ -219,9 +229,7 @@ def worker_process_batch(args):
                 "reasoning": "",
                 "error": f"max_retries_exceeded: {last_err}"
             })
-
         pbar.update(1)
-
     pbar.close()
     return out
 
@@ -247,7 +255,6 @@ def run_experiment(
 ):
     os.environ["PYTHONHASHSEED"] = str(seed)
     random.seed(seed)
-
     print(f"\n{'='*60}")
     print(f"DoF Multi-Sample Generation")
     print(f"Model: {model_type}/{model_name}")
@@ -259,11 +266,12 @@ def run_experiment(
     if resume_from:
         print(f"Resume from: {resume_from}  |  Mode: {'errors-only' if rerun_errors_only else 'missing+errors'}")
     print(f"{'='*60}\n")
-
-    print("[1/5] Loading dataset...")
+    print("[env] Loading .env and checking GOOGLE_API_KEY ...")
+    init_env()
+    print("[env] OK")
+    print(f"[1/5] Loading dataset from: {DATA_PATHS[dataset_name]}")
     df = load_dataset(dataset_name, sample_size, target_ids, seed=seed)
     print(f"Loaded {len(df)} rows (expects 'text' column).")
-
     if preview:
         if not (0 <= preview_sentence_index < len(df)):
             preview_sentence_index = 0
@@ -276,7 +284,6 @@ def run_experiment(
         print("\n[PREVIEW] ===== Rendered Prompt Sent to Gemini =====")
         print(rendered)
         print("===== /PREVIEW =====================================\n")
-
     print("[2/5] Building work items...")
     items: List[Tuple[int, str, float, int]] = []
     for idx, row in df.iterrows():
@@ -284,11 +291,8 @@ def run_experiment(
         for d in dofs:
             for k in range(n_per_dof):
                 items.append((int(idx), str(text_value), float(d), int(k)))
-
-    # ---- Resume support: 미리 기존 결과 읽고 완료/에러 키 집합 구성
-    existing_map = {}
-    success_keys = set()
-    error_keys = set()
+    existing_map: Dict[Tuple[int, str, int], Dict[str, Any]] = {}
+    success_keys, error_keys = set(), set()
     if resume_from:
         if not Path(resume_from).exists():
             raise FileNotFoundError(f"--resume-from not found: {resume_from}")
@@ -298,29 +302,24 @@ def run_experiment(
         else:
             done = success_keys
             items = [it for it in items if key_of(it[0], it[2], it[3]) not in done]
-
     total_expected = len(df) * len(dofs) * n_per_dof
     total_pending = len(items)
     print(f"[i] Total expected outputs: {total_expected}")
     if resume_from:
         print(f"[i] Existing file entries: {len(existing_map)}  (success: {len(success_keys)}, errors: {len(error_keys)})")
     print(f"[i] Pending items to run:   {total_pending}")
-
-    # ---- Output path 결정
     if output_path:
         final_jsonl_path = Path(output_path)
         ensure_dir(final_jsonl_path.parent)
     else:
         if resume_from:
-            final_jsonl_path = Path(resume_from)  # 이어쓰기
+            final_jsonl_path = Path(resume_from)
         else:
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             out_dir = RESULTS_BASE / model_type / model_name
             ensure_dir(out_dir)
             final_jsonl_path = out_dir / f"{model_type}_{model_name}_{dataset_name}_prompt-{prompt_name}_DoF_multi_{timestamp}.jsonl"
-
     meta_path = final_jsonl_path.with_suffix(".meta.json")
-
     print("[3/5] Saving meta (initial snapshot)...")
     meta = {
         "model_type": model_type,
@@ -344,12 +343,8 @@ def run_experiment(
     with open(meta_path, "w", encoding="utf-8") as f:
         json.dump(meta, f, ensure_ascii=False, indent=2)
     print(f"[i] Meta saved: {meta_path}")
-
-    print("[4/5] Parallel generation (item-level) ...")
+    print(f"[4/5] Parallel generation (item-level) ... processes={num_processes}")
     new_results_count = 0
-
-    # ---- 파일을 미리 열어두고 배치 결과를 즉시 append (실시간 쓰기)
-    # resume면 append('a'), 신규면 write('w')
     open_mode = "a" if final_jsonl_path.exists() else "w"
     with open(final_jsonl_path, open_mode, encoding="utf-8") as fout:
         if total_pending > 0:
@@ -368,16 +363,14 @@ def run_experiment(
                     position=0,
                     leave=True
                 ):
-                    # ---- 여기서 실시간으로 한 줄씩 기록
                     for obj in batch_result:
                         fout.write(json.dumps(obj, ensure_ascii=False) + "\n")
-                    fout.flush()           # OS 버퍼 flush
+                    fout.flush()
                     try:
-                        os.fsync(fout.fileno())  # 디스크 sync (가능한 경우)
+                        os.fsync(fout.fileno())
                     except OSError:
                         pass
                     new_results_count += len(batch_result)
-
     print("\n[5/5] Finalize...")
     print("\n[✓] Done.")
     print(f"Output JSONL: {final_jsonl_path}")
@@ -386,7 +379,6 @@ def run_experiment(
         print(f"(Resumed) Existing entries previously in file: {len(existing_map)}")
     else:
         print(f"Expected total for this run: {total_pending}")
-
     return str(final_jsonl_path)
 
 def parse_args():
@@ -395,26 +387,20 @@ def parse_args():
     )
     p.add_argument("--model", choices=list(USE_MODEL.keys()), required=True)
     p.add_argument("--model-name", required=True)
-    p.add_argument("--dataset", choices=["train","test"], required=True)
-
+    p.add_argument("--dataset", choices=["train", "test"], required=True)
     grp = p.add_mutually_exclusive_group(required=True)
     grp.add_argument("--all", action="store_true", help="Use all rows in dataset")
     grp.add_argument("--sample", type=int, help="Number of rows to sample")
     grp.add_argument("--ids", type=str, help="Comma-separated list of index IDs")
-
     p.add_argument("--dofs", type=str, required=True, help='Comma-separated DoF list, e.g. "0.0,0.5,1.0"')
     p.add_argument("--n-per-dof", type=int, default=30, help="How many samples per DoF for each row")
-
     p.add_argument("--num-processes", type=int, default=8)
     p.add_argument("--batch-size", type=int, default=2, help="Batch size in ITEMS (row×DoF×sample_id)")
-
     p.add_argument("--prompt-file", type=str, required=True, help="Path to external prompt template (.txt/.tmpl)")
     p.add_argument("--preview", action="store_true", help="Print a rendered prompt preview before running")
     p.add_argument("--preview-sentence-index", type=int, default=0, help="Row index in df (after sampling) to preview")
     p.add_argument("--preview-dof-index", type=int, default=0, help="Index into --dofs list to preview")
-
     p.add_argument("--seed", type=int, default=42, help="Random seed for reproducible input sampling and nonce generation")
-
     p.add_argument("--resume-from", type=str, help="Path to an existing JSONL to resume (run only missing or failed items)")
     p.add_argument("--rerun-errors-only", action="store_true", help="When resuming, re-run only rows that had non-empty error")
     p.add_argument("--output", type=str, help="Optional explicit JSONL output path. If omitted and --resume-from is set, we append to that file; otherwise a timestamped file is created.")
@@ -425,9 +411,7 @@ def main():
         set_start_method("spawn")
     except RuntimeError:
         pass
-
     args = parse_args()
-
     if args.model not in USE_MODEL:
         print(f"Unknown model type: {args.model}")
         return
@@ -435,7 +419,6 @@ def main():
         print(f"Unknown model name '{args.model_name}' for {args.model}")
         print(f"Available: {list(USE_MODEL[args.model].keys())}")
         return
-
     try:
         dofs = [float(x.strip()) for x in args.dofs.split(",")]
     except Exception:
@@ -445,7 +428,6 @@ def main():
         if not (0.0 <= d <= 1.0):
             print(f"Error: DoF {d} out of range [0.0, 1.0]")
             return
-
     sample_size = None
     target_ids = None
     if args.sample is not None:
@@ -455,13 +437,10 @@ def main():
     elif not args.all:
         print("You must provide one of --all, --sample, or --ids.")
         return
-
     prompt_text = load_prompt_file(args.prompt_file)
     prompt_name = get_prompt_name(args.prompt_file)
-
     resume_from = Path(args.resume_from) if args.resume_from else None
     output_path = Path(args.output) if args.output else None
-
     out = run_experiment(
         model_type=args.model,
         model_name=args.model_name,

@@ -4,26 +4,13 @@ import math
 from pathlib import Path
 from collections import Counter
 from typing import List, Tuple, Optional, Dict
+import re
 
 import numpy as np
 import pandas as pd
 from tqdm import tqdm
 import matplotlib.pyplot as plt
 import seaborn as sns
-
-_HF_AVAILABLE = True
-try:
-    from transformers import AutoTokenizer, AutoModelForCausalLM
-    import torch
-except Exception:
-    _HF_AVAILABLE = False
-
-STOPWORDS = set("""
-a an the and or but if while of in on at by for to from with without within about across after before during between
-is am are was were be been being do does did doing have has had having can could may might must shall should will would
-i you he she it we they me him her us them my your his hers its our their mine yours ours theirs this that these those
-as not no nor so than too very just only also into over under again further then once here there when where why how
-""".split())
 
 def word_tokens(text: str) -> List[str]:
     tokens = []
@@ -39,7 +26,12 @@ def word_tokens(text: str) -> List[str]:
         tokens.append(''.join(cur))
     return tokens
 
+_SENT_SPLIT_RE = re.compile(r'(?<=[\.!?。！？])\s+|[\r\n]+')
+
 def sentence_split(text: str) -> List[str]:
+    parts = [p.strip() for p in _SENT_SPLIT_RE.split(text) if p.strip()]
+    if parts:
+        return parts
     parts = []
     cur = []
     for ch in text:
@@ -82,30 +74,54 @@ def mtld(tokens: List[str], ttr_threshold: float = 0.72, min_seg: int = 10) -> f
         return 0.0
     return ( _mtld_one(tokens) + _mtld_one(list(reversed(tokens))) ) / 2.0
 
-def hdd(tokens: List[str], sample_size: int = 42) -> float:
-    N = len(tokens)
-    if N == 0:
-        return 0.0
-    s = min(sample_size, N)
-    freqs = Counter(tokens)
-    denom = math.comb(N, s) if N >= s else 0
-    contribs = []
-    for f in freqs.values():
-        p0 = math.comb(N - f, s) / denom if denom > 0 else 0.0
-        contribs.append(1.0 - p0)
-    return float(np.mean(contribs)) if contribs else 0.0
+VOWELS = "aeiouy"
 
-def shannon_entropy_normalized(tokens: List[str]) -> float:
-    N = len(tokens)
-    if N == 0:
-        return 0.0
-    freqs = Counter(tokens)
-    V = len(freqs)
-    if V <= 1:
-        return 0.0
-    ps = [c / N for c in freqs.values()]
-    H = -sum(p * math.log(p + 1e-12) for p in ps)
-    return float(H / math.log(V))
+def syllable_count(word: str) -> int:
+    w = word.lower()
+    if not w:
+        return 0
+    count = 0
+    prev_vowel = False
+    for ch in w:
+        is_v = ch in VOWELS
+        if is_v and not prev_vowel:
+            count += 1
+        prev_vowel = is_v
+    if w.endswith("e") and count > 1:
+        count -= 1
+    return max(count, 1)
+
+_ALPHA_RE = re.compile(r'[A-Za-z]')
+
+def is_mostly_english(text: str, thresh: float = 0.6) -> bool:
+    letters = [ch for ch in text if ch.isalpha()]
+    if not letters:
+        return False
+    eng = sum(1 for ch in letters if 'a' <= ch.lower() <= 'z')
+    return (eng / len(letters)) >= thresh
+
+def fkgl_safe(text: str) -> float:
+    if not is_mostly_english(text):
+        return np.nan
+
+    sents = sentence_split(text)
+    words = word_tokens(text)
+    W = len(words)
+    S = len(sents)
+
+    if W == 0 or S == 0:
+        return np.nan
+
+    if (W / S) > 100:  
+        return np.nan
+
+    syls = sum(syllable_count(w) for w in words)
+    syl_per_word = syls / W
+
+    if not (0.8 <= syl_per_word <= 3.5):
+        return np.nan
+
+    return float(0.39 * (W / S) + 11.8 * syl_per_word - 15.59)
 
 def mean_sentence_length(text: str) -> float:
     sents = sentence_split(text)
@@ -114,58 +130,7 @@ def mean_sentence_length(text: str) -> float:
     lengths = [len(word_tokens(s)) for s in sents]
     return float(np.mean(lengths)) if lengths else 0.0
 
-def distinct_n(tokens: List[str], n: int) -> float:
-    ng = ngrams(tokens, n)
-    total = len(ng)
-    if total == 0:
-        return 0.0
-    return float(len(set(ng)) / total)
-
-class HFPerplexity:
-    def __init__(self, model_name: str = "gpt2", device: Optional[str] = None, max_len: int = 512):
-        if not _HF_AVAILABLE:
-            raise RuntimeError("transformers/torch not available")
-        self.tokenizer = AutoTokenizer.from_pretrained(model_name)
-        self.model = AutoModelForCausalLM.from_pretrained(model_name)
-        if device is None:
-            device = "cuda" if torch.cuda.is_available() else "cpu"
-        self.device = device
-        self.model.to(self.device)
-        self.model.eval()
-        self.max_len = max_len
-
-    @torch.no_grad()
-    def perplexity(self, text: str) -> float:
-        enc = self.tokenizer(text, return_tensors="pt", truncation=True, max_length=self.max_len)
-        input_ids = enc["input_ids"].to(self.device)
-        attn = enc["attention_mask"].to(self.device)
-        outputs = self.model(input_ids=input_ids, attention_mask=attn, labels=input_ids)
-        loss = outputs.loss.item()
-        ppl = float(math.exp(loss))
-        return ppl
-
-def build_unigram_model(corpus_tokens: List[List[str]], alpha: float = 1.0) -> Dict[str, float]:
-    counts = Counter()
-    for toks in corpus_tokens:
-        counts.update(toks)
-    V = len(counts)
-    N = sum(counts.values())
-    base = alpha / (N + alpha * V) if (N + alpha * V) > 0 else 0.0
-    probs = {w: (counts[w] + alpha) / (N + alpha * V) for w in counts}
-    probs["<UNK>"] = base
-    return probs
-
-def unigram_perplexity(tokens: List[str], probs: Dict[str, float]) -> float:
-    if len(tokens) == 0:
-        return 0.0
-    ll = 0.0
-    for w in tokens:
-        p = probs.get(w, probs.get("<UNK>", 1e-12))
-        ll += -math.log(p + 1e-12)
-    xent = ll / len(tokens)
-    return float(math.exp(xent))
-
-TT_METRICS = ["MTLD", "HDD", "NormEntropy", "Perplexity", "Distinct1", "Distinct2", "MSL"]
+TT_METRICS = ["MTLD", "MSL", "FKGL"]
 
 def load_jsonl_rows(input_dir: Path) -> pd.DataFrame:
     files = sorted([p for p in input_dir.glob("*.jsonl") if p.is_file()])
@@ -186,9 +151,9 @@ def load_jsonl_rows(input_dir: Path) -> pd.DataFrame:
                 if not cont:
                     continue
                 rows.append({
-                    "index": int(obj["index"]),
+                    "index": int(obj.get("index", -1)),
                     "dof_value": float(obj["dof_value"]),
-                    "sample_id": int(obj.get("sample_id", obj["index"])),
+                    "sample_id": int(obj.get("sample_id", obj.get("index", -1))),
                     "continuation": cont
                 })
     if not rows:
@@ -197,26 +162,9 @@ def load_jsonl_rows(input_dir: Path) -> pd.DataFrame:
 
 def compute_metrics_per_sample(
     df: pd.DataFrame,
-    ppl_model_name: Optional[str] = None,
-    ppl_max_len: int = 512,
-    unigram_alpha: float = 1.0,
     show_progress: bool = True
 ) -> pd.DataFrame:
-    hf_ppl = None
-    if ppl_model_name:
-        if not _HF_AVAILABLE:
-            print("[WARN] transformers not available; falling back to unigram perplexity.")
-        else:
-            try:
-                hf_ppl = HFPerplexity(ppl_model_name, max_len=ppl_max_len)
-                print(f"[INFO] Using HF model for perplexity: {ppl_model_name} (device={hf_ppl.device})")
-            except Exception as e:
-                print(f"[WARN] Failed to init HF model ({e}); fallback to unigram perplexity.")
-
-    all_tokens = [word_tokens(t) for t in df["continuation"].tolist()]
-    unigram_probs = build_unigram_model(all_tokens, alpha=unigram_alpha)
-
-    metrics = {k: [] for k in TT_METRICS}
+    metrics: Dict[str, list] = {k: [] for k in TT_METRICS}
 
     iterator = tqdm(df.iterrows(), total=len(df), desc="Computing metrics (per sample)") if show_progress else df.iterrows()
 
@@ -224,102 +172,41 @@ def compute_metrics_per_sample(
         txt = row["continuation"]
         toks = word_tokens(txt)
 
+        # MTLD
         try: metrics["MTLD"].append(mtld(toks))
         except Exception: metrics["MTLD"].append(np.nan)
 
-        try: metrics["HDD"].append(hdd(toks))
-        except Exception: metrics["HDD"].append(np.nan)
-
-        try: metrics["NormEntropy"].append(shannon_entropy_normalized(toks))
-        except Exception: metrics["NormEntropy"].append(np.nan)
-
-        try: metrics["Distinct1"].append(distinct_n(toks, 1))
-        except Exception: metrics["Distinct1"].append(np.nan)
-
-        try: metrics["Distinct2"].append(distinct_n(toks, 2))
-        except Exception: metrics["Distinct2"].append(np.nan)
-
+        # MSL
         try: metrics["MSL"].append(mean_sentence_length(txt))
         except Exception: metrics["MSL"].append(np.nan)
 
-        # Perplexity
-        try:
-            if hf_ppl is not None:
-                val = hf_ppl.perplexity(txt)
-            else:
-                val = unigram_perplexity(toks, unigram_probs)
-        except Exception:
-            val = np.nan
-        metrics["Perplexity"].append(val)
+        # FKGL
+        try: metrics["FKGL"].append(fkgl_safe(txt))
+        except Exception: metrics["FKGL"].append(np.nan)
 
     for k, v in metrics.items():
         df[k] = v
     return df
 
-def plot_violin_box_points(df: pd.DataFrame, out_dir: Path, downsample: Optional[int] = 1000):
+def plot_ecdf(df: pd.DataFrame, out_dir: Path, palette: Optional[List[str]] = None):
     sns.set(style="whitegrid")
     dof_order = sorted(df["dof_value"].unique())
     df["dof_value"] = pd.Categorical(df["dof_value"], categories=dof_order, ordered=True)
-    metric_cols = [c for c in TT_METRICS]
+    metric_cols = list(TT_METRICS)
+
+    if palette is None:
+        palette = sns.color_palette(n_colors=len(dof_order))
 
     for metric in metric_cols:
         plot_df = df[["dof_value", metric]].dropna().copy()
-
-        if downsample is not None and downsample > 0:
-            sampled = []
-            for d in dof_order:
-                sub = plot_df[plot_df["dof_value"] == d]
-                if len(sub) > downsample:
-                    sampled.append(sub.sample(n=downsample, random_state=2025))
-                else:
-                    sampled.append(sub)
-            plot_df = pd.concat(sampled, ignore_index=True)
-
+        if len(plot_df) == 0:
+            continue
         plt.figure(figsize=(7.6, 5.4))
-        ax = sns.violinplot(
-            data=plot_df,
-            x="dof_value",
-            y=metric,
-            inner=None,
-            cut=0
-        )
-        sns.boxplot(
-            data=plot_df,
-            x="dof_value",
-            y=metric,
-            showfliers=False,
-            whis=1.5,
-            width=0.25
-        )
-        sns.stripplot(
-            data=plot_df,
-            x="dof_value",
-            y=metric,
-            size=2.0,
-            alpha=0.35,
-            jitter=0.25
-        )
-        ax.set_xlabel("DoF")
-        ax.set_title(f"{metric} by DoF — Violin + Box + Points")
-        plt.tight_layout()
-        out_path = out_dir / f"violin_{metric}.png"
-        plt.savefig(out_path, dpi=220)
-        plt.close()
-
-def plot_ecdf(df: pd.DataFrame, out_dir: Path):
-    sns.set(style="whitegrid")
-    dof_order = sorted(df["dof_value"].unique())
-    df["dof_value"] = pd.Categorical(df["dof_value"], categories=dof_order, ordered=True)
-    metric_cols = [c for c in TT_METRICS]
-
-    for metric in metric_cols:
-        plot_df = df[["dof_value", metric]].dropna().copy()
-        plt.figure(figsize=(7.6, 5.4))
-        for d in dof_order:
-            sub = plot_df[plot_df["dof_value"] == d][metric].values
+        for color, d in zip(palette, dof_order):
+            sub = plot_df.loc[plot_df["dof_value"] == d, metric].values
             if len(sub) == 0:
                 continue
-            sns.ecdfplot(x=sub, label=f"DoF {d}")
+            sns.ecdfplot(x=sub, label=f"DoF {d}", color=color)
         plt.legend(title="DoF")
         plt.xlabel(metric)
         plt.ylabel("ECDF")
@@ -329,42 +216,10 @@ def plot_ecdf(df: pd.DataFrame, out_dir: Path):
         plt.savefig(out_path, dpi=220)
         plt.close()
 
-def plot_mean_ci(df: pd.DataFrame, out_dir: Path, ci: int = 95):
-    """DoF별 평균과 신뢰구간(부트스트랩) 라인 플롯."""
-    sns.set(style="whitegrid")
-    dof_order = sorted(df["dof_value"].unique())
-    df["dof_value"] = pd.Categorical(df["dof_value"], categories=dof_order, ordered=True)
-    metric_cols = [c for c in TT_METRICS]
-
-    for metric in metric_cols:
-        plot_df = df[["dof_value", metric]].dropna().copy()
-        plt.figure(figsize=(7.6, 5.4))
-        ax = sns.pointplot(
-            data=plot_df,
-            x="dof_value",
-            y=metric,
-            errorbar=("ci", ci),
-            capsize=.15,
-            dodge=True
-        )
-        ax.set_xlabel("DoF")
-        ax.set_title(f"{metric} — Mean ± {ci}% CI by DoF")
-        plt.tight_layout()
-        out_path = out_dir / f"mean_ci_{metric}.png"
-        plt.savefig(out_path, dpi=220)
-        plt.close()
-
 def main():
-    ap = argparse.ArgumentParser(description="Top-tier metric evaluation (MTLD, HDD, Entropy, Perplexity, Distinct-n, MSL) with plots.")
+    ap = argparse.ArgumentParser(description="Metric evaluation (MTLD, MSL, FKGL) with ECDF plots by DoF.")
     ap.add_argument("--input-dir", required=True, help="Directory with .jsonl files")
     ap.add_argument("--out-dir", default=None, help="Output directory for plots/CSVs")
-    ap.add_argument("--plots", choices=["violin", "ecdf", "meanci", "all"], default="all",
-                    help="Which plots to generate")
-    ap.add_argument("--downsample", type=int, default=1000, help="Max points per DoF for scatter overlay")
-    ap.add_argument("--ppl-model", default=None,
-                    help="HF model name for perplexity (e.g., gpt2). If omitted or unavailable, uses unigram PPL.")
-    ap.add_argument("--ppl-max-len", type=int, default=512, help="Max tokens for HF model perplexity")
-    ap.add_argument("--unigram-alpha", type=float, default=1.0, help="Laplace smoothing alpha for unigram PPL fallback")
     args = ap.parse_args()
 
     input_dir = Path(args.input_dir)
@@ -377,25 +232,14 @@ def main():
     df.to_csv(raw_csv, index=False, encoding="utf-8")
     print(f"Saved raw rows: {raw_csv}")
 
-    print("Computing top-tier metrics per sample...")
-    df_metrics = compute_metrics_per_sample(
-        df,
-        ppl_model_name=args.ppl_model,
-        ppl_max_len=args.ppl_max_len,
-        unigram_alpha=args.unigram_alpha,
-        show_progress=True
-    )
+    print("Computing metrics per sample...")
+    df_metrics = compute_metrics_per_sample(df, show_progress=True)
     per_sample_csv = out_dir / "per_sample_metrics_TT.csv"
     df_metrics.to_csv(per_sample_csv, index=False, encoding="utf-8")
     print(f"Saved per-sample metrics: {per_sample_csv}")
 
-    print("Plotting...")
-    if args.plots in ("violin", "all"):
-        plot_violin_box_points(df_metrics, out_dir, downsample=args.downsample)
-    if args.plots in ("ecdf", "all"):
-        plot_ecdf(df_metrics, out_dir)
-    if args.plots in ("meanci", "all"):
-        plot_mean_ci(df_metrics, out_dir)
+    print("Plotting ECDFs (DoF-wise)...")
+    plot_ecdf(df_metrics, out_dir)
 
     print(f"All done. Outputs saved to: {out_dir}")
 
