@@ -6,8 +6,8 @@
 
 현재 포함된 지표는 다음과 같습니다:
 
--   **MTLD (Measure of Textual Lexical Diversity)**\
--   **MSL (Mean Sentence Length)**\
+-   **MTLD (Measure of Textual Lexical Diversity)**
+-   **MSL (Mean Sentence Length)**
 -   **FKGL (Flesch--Kincaid Grade Level)**
 
 ------------------------------------------------------------------------
@@ -18,7 +18,7 @@
 
 -   텍스트의 **어휘 다양성(Lexical Diversity)** 을 측정하는 대표적인
     지표입니다.
--   단순 Type/Token Ratio(TTR, 고유 단어 수 ÷ 전체 단어 수)의
+-   단순 TypeToken Ratio(TTR, 고유 단어 수 ÷ 전체 단어 수)의
     문제점(텍스트 길이에 민감)을 보완하여 안정적인 값을 제공합니다.
 
 ### 계산 과정 (코드 기준)
@@ -51,8 +51,8 @@
 ### 계산 과정 (코드 기준)
 
 1.  문장 분리(`sentence_split`) → `.`, `!`, `?`, `\n` 등을 경계로 문장
-    단위로 나눔\
-2.  각 문장마다 단어 수(`word_tokens`) 계산\
+    단위로 나눔
+2.  각 문장마다 단어 수(`word_tokens`) 계산
 3.  문장별 단어 수 평균 = MSL
 
 ### 해석
