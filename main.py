@@ -40,7 +40,7 @@ DATA_PATHS: Dict[str, Path] = {
 USE_MODEL: Dict[str, Dict[str, Dict[str, float | int]]] = {
     "gemini": {
         "gemini-2.0-flash-lite": {"temperature": 1.0, "max_output_tokens": 8192},
-        "gemini-2.0-flash": {"temperature": 0.7, "max_output_tokens": 8192},
+        "gemini-2.0-flash": {"temperature": 0.3, "max_output_tokens": 8192},
         "gemini-2.5-flash": {"temperature": 1.0, "max_output_tokens": 8192},
         "gemini-2.5-pro": {"temperature": 1.0, "max_output_tokens": 8192}
     }
