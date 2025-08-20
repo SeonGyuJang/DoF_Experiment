@@ -1,4 +1,6 @@
-# python essay_main.py --model gemini --model-name gemini-2.0-flash --dataset train --sample 1000 --essay-set 7 --dofs 0.0,0.5,1.0 --n-per-dof 10 --num-processes 8 --batch-size 2 --prompt-file C:\Users\dsng3\Documents\GitHub\DoF_Experiment\prompts\essay\exp1_prompt7.tmpl --preview
+# python essay_main.py --model gemini --model-name gemini-2.0-flash --prompt-file C:\Users\dsng3\Documents\GitHub\DoF_Experiment\prompts\essay\zero_shot_prompt7.tmpl --prompt-type zero_shot --n-samples 10000 --preview
+
+# python essay_main.py --model gemini --model-name gemini-2.0-flash --prompt-file C:\Users\dsng3\Documents\GitHub\DoF_Experiment\prompts\essay\few_shot_exp1_prompt7.tmpl --prompt-type few_shot --dataset train --essay-set 7 --few-shot-count 3 --n-samples 10000 --preview
 
 import argparse
 import json
@@ -29,7 +31,7 @@ DATA_PATHS: Dict[str, Path] = {
 USE_MODEL: Dict[str, Dict[str, Dict[str, float | int]]] = {
     "gemini": {
         "gemini-2.0-flash-lite": {"temperature": 1.0, "max_output_tokens": 8192},
-        "gemini-2.0-flash": {"temperature": 1.0, "max_output_tokens": 8192},
+        "gemini-2.0-flash": {"temperature": 0.7, "max_output_tokens": 8192},
         "gemini-2.5-flash": {"temperature": 1.0, "max_output_tokens": 8192},
         "gemini-2.5-pro": {"temperature": 1.0, "max_output_tokens": 8192}
     }
@@ -42,12 +44,11 @@ def chunk_list(lst, chunk_size):
     for i in range(0, len(lst), chunk_size):
         yield lst[i:i + chunk_size]
 
-def key_of(index: int, dof_value: float, sample_id: int) -> Tuple[int, str, int]:
-    return (int(index), f"{float(dof_value):.6f}", int(sample_id))
+def key_of(sample_id: int) -> Tuple[int]:
+    return (int(sample_id),)
 
-def parse_result_key(obj: Dict[str, Any]) -> Tuple[int, str, int]:
-    dof_value = obj.get("dof_value", 0.0)
-    return key_of(int(obj["index"]), float(dof_value), int(obj["sample_id"]))
+def parse_result_key(obj: Dict[str, Any]) -> Tuple[int]:
+    return key_of(int(obj["sample_id"]))
 
 def load_prompt_file(path: str) -> str:
     p = Path(path)
@@ -125,6 +126,39 @@ def load_dataset(
     df = df.sort_index()
     return df
 
+def get_few_shot_examples(df: pd.DataFrame, n_examples: int, seed: int = 42) -> str:
+    """Few-shot 예시 생성"""
+    random.seed(seed)
+    
+    # 랜덤하게 n_examples 개의 에세이 선택
+    if len(df) < n_examples:
+        print(f"Warning: Requested {n_examples} examples but only {len(df)} available")
+        n_examples = len(df)
+    
+    sample_essays = df.sample(n=n_examples, random_state=seed)
+    
+    examples = []
+    for i, (_, row) in enumerate(sample_essays.iterrows(), 1):
+        essay_text = row['text']
+        examples.append(f"Example {i}: {essay_text}")
+    
+    return "\n\n".join(examples)
+
+def prepare_prompt_text(prompt_text: str, prompt_type: str, few_shot_count: Optional[int] = None, examples_df: Optional[pd.DataFrame] = None, seed: int = 42) -> str:
+    """프롬프트 텍스트 준비 - few-shot의 경우 예시 추가"""
+    if prompt_type == "few_shot":
+        if few_shot_count is None or examples_df is None:
+            raise ValueError("Few-shot requires few_shot_count and examples_df")
+        
+        # {few_shot} 플레이스홀더가 있는지 확인
+        if "{few_shot}" not in prompt_text:
+            raise ValueError("Few-shot prompt template must contain {few_shot} placeholder")
+        
+        few_shot_examples = get_few_shot_examples(examples_df, few_shot_count, seed)
+        return prompt_text.replace("{few_shot}", few_shot_examples)
+    
+    return prompt_text
+
 def initialize_llm(model_type: str, model_name: str):
     if model_type != "gemini":
         raise ValueError(f"Only 'gemini' is supported in this script. Got: {model_type}")
@@ -142,37 +176,27 @@ def _build_chain(model_type: str, model_name: str, prompt_text: str):
     chain = prompt | llm | parser
     return chain, prompt
 
-def build_payload(prompt_text: str, text_value: str, dof_value: float, nonce: Optional[int]):
+def build_payload(prompt_text: str, nonce: Optional[int]):
     tmpl = PromptTemplate.from_template(prompt_text)
     vars_ = set(tmpl.input_variables)
     payload: Dict[str, Any] = {}
     
-    if "text" in vars_:
-        payload["text"] = text_value
-    if "sentence" in vars_:
-        payload["sentence"] = text_value
-    if "essay" in vars_:
-        payload["essay"] = text_value
-    
     if "input_length" in vars_:
-        payload["input_length"] = len(text_value.split())
-    
-    if "dof_value" in vars_:
-        payload["dof_value"] = dof_value
+        payload["input_length"] = 170  # 고정값
     
     if "nonce" in vars_ and nonce is not None:
         payload["nonce"] = nonce
     
     return payload
 
-def render_preview(prompt: PromptTemplate, text_value: str, dof_value: float, prompt_text: str) -> str:
+def render_preview(prompt: PromptTemplate, prompt_text: str) -> str:
     use_nonce = "{nonce}" in prompt_text
     nonce = 123456789 if use_nonce else None
-    kwargs = build_payload(prompt_text, text_value, dof_value, nonce)
+    kwargs = build_payload(prompt_text, nonce)
     return prompt.format(**kwargs)
 
-def load_existing_results(jsonl_path: Path) -> Tuple[Dict[Tuple[int, str, int], Dict[str, Any]], set, set]:
-    results_map: Dict[Tuple[int, str, int], Dict[str, Any]] = {}
+def load_existing_results(jsonl_path: Path) -> Tuple[Dict[Tuple[int], Dict[str, Any]], set, set]:
+    results_map: Dict[Tuple[int], Dict[str, Any]] = {}
     success_keys, error_keys = set(), set()
     
     if not jsonl_path.exists():
@@ -204,7 +228,7 @@ def load_existing_results(jsonl_path: Path) -> Tuple[Dict[Tuple[int, str, int], 
     return results_map, success_keys, error_keys
 
 def worker_process_batch(args):
-    (batch_items, model_type, model_name, prompt_text, prompt_name, seed, uses_dof) = args
+    (batch_items, model_type, model_name, prompt_text, prompt_name, seed) = args
     try:
         wid = current_process()._identity[0]
     except Exception:
@@ -220,25 +244,21 @@ def worker_process_batch(args):
         leave=False
     )
     use_nonce = "{nonce}" in prompt_text
-    for idx, text_value, dof, sample_id in batch_items:
+    for sample_id in batch_items:
         nonce = random.getrandbits(64) if use_nonce else None
-        payload = build_payload(prompt_text, text_value, dof, nonce)
+        payload = build_payload(prompt_text, nonce)
         retry = 0
         last_err = None
         while retry < 5:
             try:
                 res = chain.invoke(payload)
                 result = {
-                    "index": idx,
-                    "original_text": text_value,
                     "sample_id": sample_id,
                     "prompt_name": prompt_name,
                     "continuation": res.get("continuation", ""),
                     "reasoning": res.get("reasoning", ""),
                     "error": None
                 }
-                if uses_dof:
-                    result["dof_value"] = dof
                 
                 out.append(result)
                 break
@@ -247,16 +267,12 @@ def worker_process_batch(args):
                 retry += 1
         if retry >= 5:
             result = {
-                "index": idx,
-                "original_text": text_value,
                 "sample_id": sample_id,
                 "prompt_name": prompt_name,
                 "continuation": "",
                 "reasoning": "",
                 "error": f"max_retries_exceeded: {last_err}"
             }
-            if uses_dof:
-                result["dof_value"] = dof
             
             out.append(result)
         pbar.update(1)
@@ -266,19 +282,15 @@ def worker_process_batch(args):
 def run_experiment(
     model_type: str,
     model_name: str,
-    dataset_name: str,
-    dofs: List[float],
-    n_per_dof: int,
-    prompt_text: str,
-    prompt_name: str,
-    sample_size: Optional[int] = None,
-    target_ids: Optional[List[int]] = None,
+    prompt_file: str,
+    prompt_type: str,
+    n_samples: int,
+    dataset_name: Optional[str] = None,
     essay_set: Optional[int] = None,
+    few_shot_count: Optional[int] = None,
     num_processes: int = 8,
     batch_size: int = 2,
     preview: bool = False,
-    preview_sentence_index: int = 0,
-    preview_dof_index: int = 0,
     seed: int = 42,
     resume_from: Optional[Path] = None,
     rerun_errors_only: bool = False,
@@ -287,21 +299,17 @@ def run_experiment(
     os.environ["PYTHONHASHSEED"] = str(seed)
     random.seed(seed)
     
-    uses_dof = "{dof_value}" in prompt_text
-    
     print(f"\n{'='*60}")
-    print(f"DoF Essay Generation Experiment")
+    print(f"Essay Generation Experiment")
     print(f"Model: {model_type}/{model_name}")
-    print(f"Dataset: {dataset_name}")
-    if essay_set is not None:
-        print(f"Essay Set: {essay_set}")
-    print(f"Prompt: {prompt_name}")
-    print(f"Uses DoF values: {uses_dof}")
-    if uses_dof:
-        print(f"DoFs: {dofs}  |  n_per_dof: {n_per_dof}")
-    else:
-        print(f"DoF values ignored (prompt doesn't use dof_value)")
-        print(f"n_per_dof: {n_per_dof} (generates {n_per_dof} variations per input)")
+    print(f"Prompt Type: {prompt_type}")
+    print(f"Prompt File: {prompt_file}")
+    if prompt_type == "few_shot":
+        print(f"Few-shot Examples: {few_shot_count}")
+        print(f"Dataset: {dataset_name} (for examples)")
+        if essay_set is not None:
+            print(f"Essay Set: {essay_set}")
+    print(f"Total samples to generate: {n_samples}")
     print(f"Processes: {num_processes}  |  Batch size (items): {batch_size}")
     print(f"Seed: {seed}")
     if resume_from:
@@ -312,56 +320,43 @@ def run_experiment(
     init_env()
     print("[env] OK")
     
-    print(f"[1/5] Loading dataset from: {DATA_PATHS[dataset_name]}")
-    df = load_dataset(dataset_name, sample_size, target_ids, essay_set, seed=seed)
-    print(f"Final dataset size: {len(df)} rows")
+    print(f"[1/5] Loading prompt from: {prompt_file}")
+    prompt_text = load_prompt_file(prompt_file)
+    prompt_name = get_prompt_name(prompt_file)
+    
+    # Few-shot의 경우 예시 추가
+    if prompt_type == "few_shot":
+        if not dataset_name:
+            raise ValueError("Few-shot requires dataset_name for examples")
+        print(f"[1.1/5] Preparing few-shot examples...")
+        # Few-shot을 위한 예시 데이터셋 로드
+        examples_df = load_dataset(dataset_name, essay_set=essay_set, seed=seed + 1000)
+        prompt_text = prepare_prompt_text(prompt_text, prompt_type, few_shot_count, examples_df, seed)
+        prompt_name += f"_{few_shot_count}shot"
     
     if preview:
-        if not (0 <= preview_sentence_index < len(df)):
-            preview_sentence_index = 0
-        if not (0 <= preview_dof_index < len(dofs)):
-            preview_dof_index = 0
-        text_value = df.iloc[preview_sentence_index]["text"]
-        dof_val = dofs[preview_dof_index]
         _, prompt_obj = _build_chain(model_type, model_name, prompt_text)
-        rendered = render_preview(prompt_obj, text_value, dof_val, prompt_text)
+        rendered = render_preview(prompt_obj, prompt_text)
         print("\n[PREVIEW] ===== Rendered Prompt Sent to Gemini =====")
         print(rendered)
-        if uses_dof:
-            print(f"\n[DoF Value Used: {dof_val}]")
-        else:
-            print(f"\n[DoF Value Not Used in Prompt]")
         print("===== /PREVIEW =====================================\n")
     
     print("[2/5] Building work items...")
-    items: List[Tuple[int, str, float, int]] = []
-    for idx, row in df.iterrows():
-        text_value = row["text"]
-        if uses_dof:
-            for d in dofs:
-                for k in range(n_per_dof):
-                    items.append((int(idx), str(text_value), float(d), int(k)))
-        else:
-            for k in range(n_per_dof):
-                items.append((int(idx), str(text_value), 0.0, int(k)))
+    items: List[int] = list(range(n_samples))
     
-    existing_map: Dict[Tuple[int, str, int], Dict[str, Any]] = {}
+    existing_map: Dict[Tuple[int], Dict[str, Any]] = {}
     success_keys, error_keys = set(), set()
     if resume_from:
         if not Path(resume_from).exists():
             raise FileNotFoundError(f"--resume-from not found: {resume_from}")
         existing_map, success_keys, error_keys = load_existing_results(Path(resume_from))
         if rerun_errors_only:
-            items = [it for it in items if key_of(it[0], it[2], it[3]) in error_keys]
+            items = [it for it in items if key_of(it) in error_keys]
         else:
             done = success_keys
-            items = [it for it in items if key_of(it[0], it[2], it[3]) not in done]
+            items = [it for it in items if key_of(it) not in done]
     
-    if uses_dof:
-        total_expected = len(df) * len(dofs) * n_per_dof
-    else:
-        total_expected = len(df) * n_per_dof
-    
+    total_expected = n_samples
     total_pending = len(items)
     print(f"[i] Total expected outputs: {total_expected}")
     if resume_from:
@@ -378,25 +373,23 @@ def run_experiment(
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             out_dir = RESULTS_BASE 
             ensure_dir(out_dir)
-            dof_suffix = "with_DoF" if uses_dof else "no_DoF"
-            final_jsonl_path = out_dir / f"{model_type}_{model_name}_{dataset_name}_prompt-{prompt_name}_{dof_suffix}_{timestamp}.jsonl"
+            final_jsonl_path = out_dir / f"{model_type}_{model_name}_prompt-{prompt_name}_{timestamp}.jsonl"
     
     meta_path = final_jsonl_path.with_suffix(".meta.json")
     print("[3/5] Saving meta (initial snapshot)...")
     meta = {
         "model_type": model_type,
         "model_name": model_name,
-        "dataset": dataset_name,
-        "essay_set": essay_set,
-        "uses_dof": uses_dof,
-        "dofs": dofs if uses_dof else [0.0],
-        "n_per_dof": n_per_dof,
-        "num_input_rows": int(len(df)),
+        "prompt_type": prompt_type,
+        "prompt_file": prompt_file,
+        "dataset_name": dataset_name if prompt_type == "few_shot" else None,
+        "essay_set": essay_set if prompt_type == "few_shot" else None,
+        "few_shot_count": few_shot_count if prompt_type == "few_shot" else None,
+        "n_samples": n_samples,
         "total_expected_outputs": int(total_expected),
         "batch_size_items": batch_size,
         "num_processes": num_processes,
         "output_jsonl": str(final_jsonl_path),
-        "prompt_file_used": True,
         "prompt_name": prompt_name,
         "prompt_text_snapshot": prompt_text,
         "seed": seed,
@@ -420,7 +413,7 @@ def run_experiment(
                     pool.imap_unordered(
                         worker_process_batch,
                         [
-                            (batch, model_type, model_name, prompt_text, prompt_name, seed, uses_dof)
+                            (batch, model_type, model_name, prompt_text, prompt_name, seed)
                             for batch in task_batches
                         ]
                     ),
@@ -460,33 +453,27 @@ def setup_project_structure():
         print(f"Created example environment file: {env_path}")
     
     print(f"Project structure created.")
-    print(f"Prompt files location: {PROMPTS_BASE}")
-    print(f"Data files location: training_set_rel3.tsv, valid_set.tsv")
     print(f"Results will be saved to: {RESULTS_BASE}")
 
 def parse_args():
     p = argparse.ArgumentParser(
-        description="DoF essay generation experiment system"
+        description="Essay generation experiment system with external prompt templates"
     )
     p.add_argument("--model", choices=list(USE_MODEL.keys()), required=True)
     p.add_argument("--model-name", required=True)
-    p.add_argument("--dataset", choices=["train", "test"], required=True)
-    
-    grp = p.add_mutually_exclusive_group(required=True)
-    grp.add_argument("--all", action="store_true", help="Use all rows in dataset")
-    grp.add_argument("--sample", type=int, help="Number of rows to sample")
-    grp.add_argument("--ids", type=str, help="Comma-separated list of index IDs")
-    
-    p.add_argument("--essay-set", type=int, help="Filter by specific essay_set number (e.g., 1, 2, 3, ...)")
-    p.add_argument("--dofs", type=str, required=True, help='Comma-separated DoF list, e.g. "0.0,0.5,1.0"')
-    p.add_argument("--n-per-dof", type=int, default=10, help="How many samples per DoF for each row")
-    p.add_argument("--num-processes", type=int, default=4)
-    p.add_argument("--batch-size", type=int, default=2, help="Batch size in ITEMS (row×DoF×sample_id)")
     p.add_argument("--prompt-file", type=str, required=True, help="Path to external prompt template (.txt/.tmpl)")
+    p.add_argument("--prompt-type", choices=["dof", "zero_shot", "few_shot"], required=True, help="Type of prompt to use")
+    p.add_argument("--n-samples", type=int, required=True, help="Total number of samples to generate")
+    
+    # Few-shot specific arguments
+    p.add_argument("--dataset", choices=["train", "test"], help="Dataset for few-shot examples (required if prompt-type is few_shot)")
+    p.add_argument("--essay-set", type=int, help="Filter by specific essay_set number for few-shot examples")
+    p.add_argument("--few-shot-count", type=int, help="Number of examples for few-shot prompt (required if prompt-type is few_shot)")
+    
+    p.add_argument("--num-processes", type=int, default=4)
+    p.add_argument("--batch-size", type=int, default=2, help="Batch size in ITEMS")
     p.add_argument("--preview", action="store_true", help="Print a rendered prompt preview before running")
-    p.add_argument("--preview-sentence-index", type=int, default=0, help="Row index in df (after sampling) to preview")
-    p.add_argument("--preview-dof-index", type=int, default=0, help="Index into --dofs list to preview")
-    p.add_argument("--seed", type=int, default=42, help="Random seed for reproducible input sampling and nonce generation")
+    p.add_argument("--seed", type=int, default=42, help="Random seed for reproducible sampling")
     p.add_argument("--resume-from", type=str, help="Path to an existing JSONL to resume (run only missing or failed items)")
     p.add_argument("--rerun-errors-only", action="store_true", help="When resuming, re-run only rows that had non-empty error")
     p.add_argument("--output", type=str, help="Optional explicit JSONL output path")
@@ -516,29 +503,13 @@ def main():
         print(f"Available: {list(USE_MODEL[args.model].keys())}")
         return
     
-    try:
-        dofs = [float(x.strip()) for x in args.dofs.split(",")]
-    except Exception:
-        print('Error: --dofs must be comma-separated floats, e.g., "0.0,0.5,1.0"')
-        return
-    
-    for d in dofs:
-        if not (0.0 <= d <= 1.0):
-            print(f"Error: DoF {d} out of range [0.0, 1.0]")
+    if args.prompt_type == "few_shot":
+        if args.few_shot_count is None:
+            print("Error: --few-shot-count is required when using few_shot prompt type")
             return
-    
-    sample_size = None
-    target_ids = None
-    if args.sample is not None:
-        sample_size = args.sample
-    elif args.ids:
-        target_ids = [int(x.strip()) for x in args.ids.split(",")]
-    elif not args.all:
-        print("You must provide one of --all, --sample, or --ids.")
-        return
-    
-    prompt_text = load_prompt_file(args.prompt_file)
-    prompt_name = get_prompt_name(args.prompt_file)
+        if args.dataset is None:
+            print("Error: --dataset is required when using few_shot prompt type")
+            return
     
     resume_from = Path(args.resume_from) if args.resume_from else None
     output_path = Path(args.output) if args.output else None
@@ -546,19 +517,15 @@ def main():
     out = run_experiment(
         model_type=args.model,
         model_name=args.model_name,
+        prompt_file=args.prompt_file,
+        prompt_type=args.prompt_type,
+        n_samples=args.n_samples,
         dataset_name=args.dataset,
-        dofs=dofs,
-        n_per_dof=args.n_per_dof,
-        prompt_text=prompt_text,
-        prompt_name=prompt_name,
-        sample_size=sample_size,
-        target_ids=target_ids,
         essay_set=args.essay_set,
+        few_shot_count=args.few_shot_count,
         num_processes=args.num_processes,
         batch_size=args.batch_size,
         preview=args.preview,
-        preview_sentence_index=args.preview_sentence_index,
-        preview_dof_index=args.preview_dof_index,
         seed=args.seed,
         resume_from=resume_from,
         rerun_errors_only=args.rerun_errors_only,

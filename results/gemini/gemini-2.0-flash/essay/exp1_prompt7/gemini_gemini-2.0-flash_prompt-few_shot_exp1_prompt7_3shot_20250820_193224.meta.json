@@ -1,0 +1,20 @@
+{
+  "model_type": "gemini",
+  "model_name": "gemini-2.0-flash",
+  "prompt_type": "few_shot",
+  "prompt_file": "C:\\Users\\dsng3\\Documents\\GitHub\\DoF_Experiment\\prompts\\essay\\few_shot_exp1_prompt7.tmpl",
+  "dataset_name": "train",
+  "essay_set": 7,
+  "few_shot_count": 3,
+  "n_samples": 10000,
+  "total_expected_outputs": 10000,
+  "batch_size_items": 2,
+  "num_processes": 4,
+  "output_jsonl": "C:\\Users\\dsng3\\Documents\\GitHub\\DoF_Experiment\\results\\gemini\\gemini-2.0-flash\\essay\\gemini_gemini-2.0-flash_prompt-few_shot_exp1_prompt7_3shot_20250820_193224.jsonl",
+  "prompt_name": "few_shot_exp1_prompt7_3shot",
+  "prompt_text_snapshot": "Your task is to write an essay of approximately {input_length} words on the following topic.\n\nTopic: [Write about patience.]\n\nExample 1: My at saying your patient is. Your patient when you wait in line for something is being patient. Waiting your turn is being patience one time I was patient by waiting on the bench to play but I didn`t get to play until the fourth queiter with @NUM1 to go but you know what I did had patience. A lot of people have patient but some people just don`t have manner when they just don`t care and start the yell and screaming. Like popstars a lot of singers popstar and other famous people think they can cut in front of any one cause their rich but it they wern`t rich they would cut pop stars and movie stars just need to have patient. Am not saying all popstars and movie stars don`t have patient when they were little they never act like that.\n\nExample 2: Once upon a time there was a young girl named @CAPS1 she lived with her dad and mom in a small town of @PERSON2. It was mom in a small town of @PERSON2. It was almost her birth and she was so exited for this birthday because she was turning twelve. Twelve was here luckey number ever sience she was little. Her mom said they could go into town and go to chef @PERSON1 and eat out she agreed so that morning she woke up and dad made her some pancakes with fresh strawberrys on them she went out to go milk there cows for her parents. @CAPS1 hated milking there cows because they are very stuburn so she went out there and miked the cows in only @NUM1 minetts. @CAPS1 went back inside and put the milk on the table. @CAPS1 was starting to wonder if she was going  to get a birthday present, @CAPS1 decided it would be best if she was patient when her mom came home from work (she works at a dress making store) she said, Are you ready to go eat, @CAPS1 jumped And yeld yes, yes. So they rode in to town and parked at the restaurant, they walked in and the lights are off her dad got the light switch and all of her cloose family and friends where there and they yelled sprise @CAPS1 was is such a shock she yelled @CAPS3 you, @CAPS3 you, @CAPS3 you, and on a table was twelve presents, and under the table was a dog. Her mom & dad got her a dog. She name the dog wonder because every time she saw him she began to wonder about her  wonderful life. And she learned that great thing come when you are patient.\n\nExample 3: Patience is hard. You always @CAPS1 it now not later. You must stay calm and be pieceful in patience that they almost forgot what they are whating for but I always @CAPS1 it now too. I can't stand not having something. If theres a test on @DATE1 .I will not be happy if the test changes to @DATE2. I just can't what that long and it gives my tension just knowing whats going to happen. If you have patience it's almost like a gift just like singing and dancing one a gift.\n\nReturn your response in JSON format:\n{{\n  \"continuation\": \"<your generated continuation>\",\n  \"reasoning\": \"<brief explanation of how the influenced your response>\"\n}}",
+  "seed": 42,
+  "resume_from": "C:\\Users\\dsng3\\Documents\\GitHub\\DoF_Experiment\\results\\gemini\\gemini-2.0-flash\\essay\\gemini_gemini-2.0-flash_prompt-few_shot_exp1_prompt7_3shot_20250820_193224.jsonl",
+  "resume_mode": "errors-only",
+  "existing_entries": 10000
+}
