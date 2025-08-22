@@ -182,7 +182,9 @@ def build_payload(prompt_text: str, nonce: Optional[int]):
     payload: Dict[str, Any] = {}
     
     if "input_length" in vars_:
-        payload["input_length"] = 170  # 고정값
+        # prompt7 = 170 tokens 
+        # prompt8 = 600 tokens
+        payload["input_length"] = 600  # 고정값
     
     if "nonce" in vars_ and nonce is not None:
         payload["nonce"] = nonce
