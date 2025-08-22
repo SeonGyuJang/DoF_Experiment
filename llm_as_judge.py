@@ -34,13 +34,13 @@ JUDGE_PROMPT = """You are an expert evaluator of creative writing. Your task is 
 
 **Essays to Evaluate:**
 
-**Essay A (DoF method):**
+**Essay A**
 {essay_dof}
 
-**Essay B (Zero-shot method):**
+**Essay B:**
 {essay_zero_shot}
 
-**Essay C (Few-shot method):**
+**Essay C:**
 {essay_few_shot}
 
 **Instructions:**
@@ -138,11 +138,11 @@ def find_result_files(results_dir: Path) -> Dict[str, Path]:
     
     for file_path in results_dir.glob("*.jsonl"):
         file_name = file_path.name.lower()
-        if "dof" in file_name and ("prompt7" in file_name or "exp1" in file_name):
+        if "dof" in file_name and ("prompt8" in file_name or "exp1" in file_name):
             files['dof'] = file_path
-        elif "zero_shot" in file_name and "prompt7" in file_name:
+        elif "zero_shot" in file_name and "prompt8" in file_name:
             files['zero_shot'] = file_path
-        elif "few_shot" in file_name and ("prompt7" in file_name or "exp1" in file_name):
+        elif "few_shot" in file_name and ("prompt8" in file_name or "exp1" in file_name):
             files['few_shot'] = file_path
     
     return files
