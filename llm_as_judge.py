@@ -32,16 +32,16 @@ JUDGE_PROMPT_4 = """You are an expert evaluator of creative writing. Your task i
 
 **Essays to Evaluate:**
 
-**Essay A (DoF)**
+**Essay A**
 {essay_dof}
 
-**Essay B (Zero-shot):**
+**Essay B**
 {essay_zero_shot}
 
-**Essay C (Few-shot):**
+**Essay C:**
 {essay_few_shot}
 
-**Essay D (Simple-Instruction):**
+**Essay D:**
 {essay_simple}
 
 **Instructions:**
