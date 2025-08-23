@@ -1,0 +1,20 @@
+{
+  "model_type": "gemini",
+  "model_name": "gemini-2.0-flash",
+  "prompt_type": "few_shot",
+  "prompt_file": "/Users/jangseongyu/Documents/GitHub/DoF_Experiment/prompts/essay/prompt1/few_shot__prompt1.tmpl",
+  "dataset_name": "train",
+  "essay_set": 1,
+  "few_shot_count": 3,
+  "n_samples": 10000,
+  "total_expected_outputs": 10000,
+  "batch_size_items": 4,
+  "num_processes": 8,
+  "output_jsonl": "/Users/jangseongyu/Documents/GitHub/DoF_Experiment/results/gemini/gemini-2.0-flash/essay/gemini_gemini-2.0-flash_prompt-few_shot__prompt1_3shot_20250823_205252.jsonl",
+  "prompt_name": "few_shot__prompt1",
+  "prompt_text_snapshot": "Your task is to write an essay of approximately {input_length} words on the following topic.\n\nTopic: [The effects of widespread computer use on people and society.]\n\n{few_shot}\n\nReturn your response in JSON format:\n{{\n  \"continuation\": \"<your generated continuation>\",\n  \"reasoning\": \"<brief explanation of how the influenced your response>\"\n}}",
+  "seed": 42,
+  "resume_from": "/Users/jangseongyu/Documents/GitHub/DoF_Experiment/results/gemini/gemini-2.0-flash/essay/gemini_gemini-2.0-flash_prompt-few_shot__prompt1_3shot_20250823_205252.jsonl",
+  "resume_mode": "errors-only",
+  "existing_entries": 10000
+}

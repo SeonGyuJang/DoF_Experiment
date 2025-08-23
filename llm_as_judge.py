@@ -143,18 +143,28 @@ def _name_has_any(s: str, keywords: List[str]) -> bool:
     return all(k in s for k in keywords)
 
 def find_result_files(results_dir: Path) -> Dict[str, Path]:
-    files: Dict[str, Path] = {}
-    for file_path in results_dir.glob("*.jsonl"):
-        file_name = file_path.name.lower()
-        if "dof" in file_name and ("prompt7" in file_name or "prompt8" in file_name or "exp1" in file_name):
-            files['dof'] = file_path
-        elif "zero_shot" in file_name and ("prompt7" in file_name or "prompt8" in file_name):
-            files['zero_shot'] = file_path
-        elif "few_shot" in file_name and ("prompt7" in file_name or "prompt8" in file_name or "exp1" in file_name):
-            files['few_shot'] = file_path
-        elif _name_has_any(file_name, ["simple", "instruction"]) and ("prompt7" in file_name or "prompt8" in file_name or "exp1" in file_name):
-            files['simple_instruction'] = file_path
+    buckets = {"dof": [], "zero_shot": [], "few_shot": [], "simple_instruction": []}
+
+    def has_prompt_tag(s: str) -> bool:
+        return any(tag in s for tag in ("prompt1", "prompt7", "prompt8",))
+
+    for p in results_dir.glob("*.jsonl"):
+        name = p.name.lower()
+        if "dof" in name and has_prompt_tag(name):
+            buckets["dof"].append(p)
+        elif "zero_shot" in name and has_prompt_tag(name):
+            buckets["zero_shot"].append(p)
+        elif "few_shot" in name and has_prompt_tag(name):
+            buckets["few_shot"].append(p)
+        elif ("simple" in name and "instruction" in name) and has_prompt_tag(name):
+            buckets["simple_instruction"].append(p)
+
+    files = {}
+    for k, arr in buckets.items():
+        if arr:
+            files[k] = max(arr, key=lambda x: x.stat().st_mtime)  # 가장 최근 파일
     return files
+
 
 def create_judge_chain(llm, prompt_template: str):
     prompt = PromptTemplate.from_template(prompt_template)

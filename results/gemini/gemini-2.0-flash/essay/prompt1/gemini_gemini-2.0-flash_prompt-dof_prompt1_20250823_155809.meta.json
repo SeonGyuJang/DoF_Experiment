@@ -1,0 +1,20 @@
+{
+  "model_type": "gemini",
+  "model_name": "gemini-2.0-flash",
+  "prompt_type": "dof",
+  "prompt_file": "/Users/jangseongyu/Documents/GitHub/DoF_Experiment/prompts/essay/prompt1/dof_prompt1.tmpl",
+  "dataset_name": null,
+  "essay_set": null,
+  "few_shot_count": null,
+  "n_samples": 10000,
+  "total_expected_outputs": 10000,
+  "batch_size_items": 4,
+  "num_processes": 8,
+  "output_jsonl": "/Users/jangseongyu/Documents/GitHub/DoF_Experiment/results/gemini/gemini-2.0-flash/essay/gemini_gemini-2.0-flash_prompt-dof_prompt1_20250823_155809.jsonl",
+  "prompt_name": "dof_prompt1",
+  "prompt_text_snapshot": "Your task is to write an essay of approximately {input_length} words on the following topic.\n\nTopic: [The effects of widespread computer use on people and society.]\n\n“This is a maximum 'Degree of Freedom' (DoF) task. This concept encourages you to utilize your entire internal knowledge base without restriction. Your goal is to maximize the diversity and creativity of the output.\n\nInstructions: Write freely. Unleash your full potential and explore any perspective or style you deem compelling.”\n\nReturn your response in JSON format:\n{{\n  \"continuation\": \"<your generated continuation>\",\n  \"reasoning\": \"<brief explanation of how the influenced your response>\"\n}}",
+  "seed": 42,
+  "resume_from": "/Users/jangseongyu/Documents/GitHub/DoF_Experiment/results/gemini/gemini-2.0-flash/essay/gemini_gemini-2.0-flash_prompt-dof_prompt1_20250823_155809.jsonl",
+  "resume_mode": "errors-only",
+  "existing_entries": 10000
+}

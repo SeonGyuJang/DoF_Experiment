@@ -4,8 +4,8 @@ from pathlib import Path
 import argparse
 
 DATA_PATHS = {
-    "train": Path(r"C:\Users\dsng3\Documents\GitHub\DoF_Experiment\data\essay\training_set_rel3.tsv"),
-    "test": Path(r"C:\Users\dsng3\Documents\GitHub\DoF_Experiment\data\essay\valid_set.tsv")
+    "train": Path("/Users/jangseongyu/Documents/GitHub/DoF_Experiment/data/essay/training_set_rel3.tsv"),
+    "test": Path("/Users/jangseongyu/Documents/GitHub/DoF_Experiment/data/essay/valid_set.tsv")
 }
 
 def load_dataset(dataset_name: str, essay_set: int = None):

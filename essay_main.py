@@ -161,7 +161,8 @@ def build_payload(prompt_text: str, nonce: Optional[int]):
     vars_ = set(tmpl.input_variables)
     payload: Dict[str, Any] = {}
     if "input_length" in vars_:
-        payload["input_length"] = 600
+        # P1 : 370 / P7 : 160 / P8 : 600
+        payload["input_length"] = 370
     if "nonce" in vars_ and nonce is not None:
         payload["nonce"] = nonce
     return payload
