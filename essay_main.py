@@ -1,5 +1,4 @@
 # python essay_main.py --model gemini --model-name gemini-2.0-flash --prompt-file C:\Users\dsng3\Documents\GitHub\DoF_Experiment\prompts\essay\zero_shot_prompt7.tmpl --prompt-type zero_shot --n-samples 10000 --preview
-
 # python essay_main.py --model gemini --model-name gemini-2.0-flash --prompt-file C:\Users\dsng3\Documents\GitHub\DoF_Experiment\prompts\essay\few_shot_exp1_prompt7.tmpl --prompt-type few_shot --dataset train --essay-set 7 --few-shot-count 3 --n-samples 10000 --preview
 
 import argparse
@@ -20,12 +19,12 @@ from langchain_core.prompts import PromptTemplate
 from langchain_core.output_parsers import JsonOutputParser
 
 BASE = Path(__file__).resolve().parent
-RESULTS_BASE = Path(r"C:\Users\dsng3\Documents\GitHub\DoF_Experiment\results\gemini\gemini-2.0-flash\essay")
-PROMPTS_BASE = Path(r"C:\Users\dsng3\Documents\GitHub\DoF_Experiment\prompts\essay")
+RESULTS_BASE = Path("/Users/jangseongyu/Documents/GitHub/DoF_Experiment/results/gemini/gemini-2.0-flash/essay")
+PROMPTS_BASE = Path("/Users/jangseongyu/Documents/GitHub/DoF_Experiment/prompts/essay")
 
 DATA_PATHS: Dict[str, Path] = {
-    "train": Path(r"C:\Users\dsng3\Documents\GitHub\DoF_Experiment\data\essay\training_set_rel3.tsv"),
-    "test": Path(r"C:\Users\dsng3\Documents\GitHub\DoF_Experiment\data\essay\valid_set.tsv")
+    "train": Path("/Users/jangseongyu/Documents/GitHub/DoF_Experiment/data/essay/training_set_rel3.tsv"),
+    "test": Path("/Users/jangseongyu/Documents/GitHub/DoF_Experiment/data/essay/valid_set.tsv")
 }
 
 USE_MODEL: Dict[str, Dict[str, Dict[str, float | int]]] = {
@@ -79,7 +78,6 @@ def load_dataset(
     data_path = DATA_PATHS[dataset_name]
     if not data_path.exists():
         raise FileNotFoundError(f"Dataset not found: {data_path}")
-    
     try:
         if str(data_path).endswith('.tsv'):
             df = pd.read_csv(data_path, sep='\t', encoding='latin1')
@@ -93,10 +91,8 @@ def load_dataset(
                 df = pd.read_csv(data_path, encoding='latin1')
         except Exception as e2:
             raise RuntimeError(f"Failed to read file at {data_path}. Tried both latin1 and utf-8 encodings. Error: {repr(e)}, {repr(e2)}")
-    
     print(f"Original dataset size: {len(df)} rows")
     print(f"Available essay_sets: {sorted(df['essay_set'].unique()) if 'essay_set' in df.columns else 'No essay_set column'}")
-    
     if essay_set is not None:
         if 'essay_set' not in df.columns:
             raise KeyError("Dataset does not contain 'essay_set' column")
@@ -105,58 +101,42 @@ def load_dataset(
         print(f"Filtered to essay_set={essay_set}: {len(df)} rows (from {original_size})")
         if len(df) == 0:
             raise ValueError(f"No data found for essay_set={essay_set}")
-    
     if "essay" in df.columns and "text" not in df.columns:
         df["text"] = df["essay"]
-    
     if "text" not in df.columns:
         raise KeyError(
             "Input dataset must contain a 'text' or 'essay' column. "
             f"Columns found: {list(df.columns)}"
         )
-    
     if target_ids:
         df = df[df.index.isin(target_ids)]
         print(f"Filtered to target_ids: {len(df)} rows")
-    
     if sample_size is not None and sample_size < len(df):
         df = df.sample(n=sample_size, random_state=seed)
         print(f"Sampled {sample_size} rows from {len(df)} available")
-    
     df = df.sort_index()
     return df
 
 def get_few_shot_examples(df: pd.DataFrame, n_examples: int, seed: int = 42) -> str:
-    """Few-shot 예시 생성"""
     random.seed(seed)
-    
-    # 랜덤하게 n_examples 개의 에세이 선택
     if len(df) < n_examples:
         print(f"Warning: Requested {n_examples} examples but only {len(df)} available")
         n_examples = len(df)
-    
     sample_essays = df.sample(n=n_examples, random_state=seed)
-    
     examples = []
     for i, (_, row) in enumerate(sample_essays.iterrows(), 1):
         essay_text = row['text']
         examples.append(f"Example {i}: {essay_text}")
-    
     return "\n\n".join(examples)
 
 def prepare_prompt_text(prompt_text: str, prompt_type: str, few_shot_count: Optional[int] = None, examples_df: Optional[pd.DataFrame] = None, seed: int = 42) -> str:
-    """프롬프트 텍스트 준비 - few-shot의 경우 예시 추가"""
     if prompt_type == "few_shot":
         if few_shot_count is None or examples_df is None:
             raise ValueError("Few-shot requires few_shot_count and examples_df")
-        
-        # {few_shot} 플레이스홀더가 있는지 확인
         if "{few_shot}" not in prompt_text:
             raise ValueError("Few-shot prompt template must contain {few_shot} placeholder")
-        
         few_shot_examples = get_few_shot_examples(examples_df, few_shot_count, seed)
         return prompt_text.replace("{few_shot}", few_shot_examples)
-    
     return prompt_text
 
 def initialize_llm(model_type: str, model_name: str):
@@ -180,15 +160,10 @@ def build_payload(prompt_text: str, nonce: Optional[int]):
     tmpl = PromptTemplate.from_template(prompt_text)
     vars_ = set(tmpl.input_variables)
     payload: Dict[str, Any] = {}
-    
     if "input_length" in vars_:
-        # prompt7 = 170 tokens 
-        # prompt8 = 600 tokens
-        payload["input_length"] = 600  # 고정값
-    
+        payload["input_length"] = 600
     if "nonce" in vars_ and nonce is not None:
         payload["nonce"] = nonce
-    
     return payload
 
 def render_preview(prompt: PromptTemplate, prompt_text: str) -> str:
@@ -200,10 +175,8 @@ def render_preview(prompt: PromptTemplate, prompt_text: str) -> str:
 def load_existing_results(jsonl_path: Path) -> Tuple[Dict[Tuple[int], Dict[str, Any]], set, set]:
     results_map: Dict[Tuple[int], Dict[str, Any]] = {}
     success_keys, error_keys = set(), set()
-    
     if not jsonl_path.exists():
         return results_map, success_keys, error_keys
-    
     with open(jsonl_path, "r", encoding="utf-8") as f:
         for line in f:
             line = line.strip()
@@ -261,7 +234,6 @@ def worker_process_batch(args):
                     "reasoning": res.get("reasoning", ""),
                     "error": None
                 }
-                
                 out.append(result)
                 break
             except Exception as e:
@@ -275,7 +247,6 @@ def worker_process_batch(args):
                 "reasoning": "",
                 "error": f"max_retries_exceeded: {last_err}"
             }
-            
             out.append(result)
         pbar.update(1)
     pbar.close()
@@ -300,7 +271,6 @@ def run_experiment(
 ):
     os.environ["PYTHONHASHSEED"] = str(seed)
     random.seed(seed)
-    
     print(f"\n{'='*60}")
     print(f"Essay Generation Experiment")
     print(f"Model: {model_type}/{model_name}")
@@ -317,35 +287,27 @@ def run_experiment(
     if resume_from:
         print(f"Resume from: {resume_from}  |  Mode: {'errors-only' if rerun_errors_only else 'missing+errors'}")
     print(f"{'='*60}\n")
-    
     print("[env] Loading .env and checking GOOGLE_API_KEY ...")
     init_env()
     print("[env] OK")
-    
     print(f"[1/5] Loading prompt from: {prompt_file}")
     prompt_text = load_prompt_file(prompt_file)
     prompt_name = get_prompt_name(prompt_file)
-    
-    # Few-shot의 경우 예시 추가
     if prompt_type == "few_shot":
         if not dataset_name:
             raise ValueError("Few-shot requires dataset_name for examples")
         print(f"[1.1/5] Preparing few-shot examples...")
-        # Few-shot을 위한 예시 데이터셋 로드
         examples_df = load_dataset(dataset_name, essay_set=essay_set, seed=seed + 1000)
         prompt_text = prepare_prompt_text(prompt_text, prompt_type, few_shot_count, examples_df, seed)
         prompt_name += f"_{few_shot_count}shot"
-    
     if preview:
         _, prompt_obj = _build_chain(model_type, model_name, prompt_text)
         rendered = render_preview(prompt_obj, prompt_text)
         print("\n[PREVIEW] ===== Rendered Prompt Sent to Gemini =====")
         print(rendered)
         print("===== /PREVIEW =====================================\n")
-    
     print("[2/5] Building work items...")
     items: List[int] = list(range(n_samples))
-    
     existing_map: Dict[Tuple[int], Dict[str, Any]] = {}
     success_keys, error_keys = set(), set()
     if resume_from:
@@ -357,14 +319,12 @@ def run_experiment(
         else:
             done = success_keys
             items = [it for it in items if key_of(it) not in done]
-    
     total_expected = n_samples
     total_pending = len(items)
     print(f"[i] Total expected outputs: {total_expected}")
     if resume_from:
         print(f"[i] Existing file entries: {len(existing_map)}  (success: {len(success_keys)}, errors: {len(error_keys)})")
     print(f"[i] Pending items to run:   {total_pending}")
-    
     if output_path:
         final_jsonl_path = Path(output_path)
         ensure_dir(final_jsonl_path.parent)
@@ -376,7 +336,6 @@ def run_experiment(
             out_dir = RESULTS_BASE 
             ensure_dir(out_dir)
             final_jsonl_path = out_dir / f"{model_type}_{model_name}_prompt-{prompt_name}_{timestamp}.jsonl"
-    
     meta_path = final_jsonl_path.with_suffix(".meta.json")
     print("[3/5] Saving meta (initial snapshot)...")
     meta = {
@@ -402,11 +361,9 @@ def run_experiment(
     with open(meta_path, "w", encoding="utf-8") as f:
         json.dump(meta, f, ensure_ascii=False, indent=2)
     print(f"[i] Meta saved: {meta_path}")
-    
     print(f"[4/5] Parallel generation (item-level) ... processes={num_processes}")
     new_results_count = 0
     open_mode = "a" if final_jsonl_path.exists() else "w"
-    
     with open(final_jsonl_path, open_mode, encoding="utf-8") as fout:
         if total_pending > 0:
             task_batches = list(chunk_list(items, batch_size))
@@ -432,7 +389,6 @@ def run_experiment(
                     except OSError:
                         pass
                     new_results_count += len(batch_result)
-    
     print("\n[5/5] Finalize...")
     print("\n[✓] Done.")
     print(f"Output JSONL: {final_jsonl_path}")
@@ -441,19 +397,16 @@ def run_experiment(
         print(f"(Resumed) Existing entries previously in file: {len(existing_map)}")
     else:
         print(f"Expected total for this run: {total_pending}")
-    
     return str(final_jsonl_path)
 
 def setup_project_structure():
     ensure_dir(PROMPTS_BASE)  
     ensure_dir(RESULTS_BASE)  
-    
     env_path = BASE / ".env.example"
     if not env_path.exists():
         with open(env_path, "w") as f:
             f.write("GOOGLE_API_KEY=your_google_api_key_here\n")
         print(f"Created example environment file: {env_path}")
-    
     print(f"Project structure created.")
     print(f"Results will be saved to: {RESULTS_BASE}")
 
@@ -464,23 +417,19 @@ def parse_args():
     p.add_argument("--model", choices=list(USE_MODEL.keys()), required=True)
     p.add_argument("--model-name", required=True)
     p.add_argument("--prompt-file", type=str, required=True, help="Path to external prompt template (.txt/.tmpl)")
-    p.add_argument("--prompt-type", choices=["dof", "zero_shot", "few_shot"], required=True, help="Type of prompt to use")
+    p.add_argument("--prompt-type", choices=["dof", "zero_shot", "few_shot", "simple_instruction"], required=True, help="Type of prompt to use")
     p.add_argument("--n-samples", type=int, required=True, help="Total number of samples to generate")
-    
-    # Few-shot specific arguments
     p.add_argument("--dataset", choices=["train", "test"], help="Dataset for few-shot examples (required if prompt-type is few_shot)")
     p.add_argument("--essay-set", type=int, help="Filter by specific essay_set number for few-shot examples")
     p.add_argument("--few-shot-count", type=int, help="Number of examples for few-shot prompt (required if prompt-type is few_shot)")
-    
-    p.add_argument("--num-processes", type=int, default=4)
-    p.add_argument("--batch-size", type=int, default=2, help="Batch size in ITEMS")
+    p.add_argument("--num-processes", type=int, default=8)
+    p.add_argument("--batch-size", type=int, default=4, help="Batch size in ITEMS")
     p.add_argument("--preview", action="store_true", help="Print a rendered prompt preview before running")
     p.add_argument("--seed", type=int, default=42, help="Random seed for reproducible sampling")
     p.add_argument("--resume-from", type=str, help="Path to an existing JSONL to resume (run only missing or failed items)")
     p.add_argument("--rerun-errors-only", action="store_true", help="When resuming, re-run only rows that had non-empty error")
     p.add_argument("--output", type=str, help="Optional explicit JSONL output path")
     p.add_argument("--setup", action="store_true", help="Setup project structure")
-    
     return p.parse_args()
 
 def main():
@@ -488,15 +437,12 @@ def main():
         set_start_method("spawn")
     except RuntimeError:
         pass
-    
     args = parse_args()
-    
     if args.setup:
         print("Setting up project structure...")
         setup_project_structure()
         print("Setup complete!")
         return
-    
     if args.model not in USE_MODEL:
         print(f"Unknown model type: {args.model}")
         return
@@ -504,7 +450,6 @@ def main():
         print(f"Unknown model name '{args.model_name}' for {args.model}")
         print(f"Available: {list(USE_MODEL[args.model].keys())}")
         return
-    
     if args.prompt_type == "few_shot":
         if args.few_shot_count is None:
             print("Error: --few-shot-count is required when using few_shot prompt type")
@@ -512,10 +457,8 @@ def main():
         if args.dataset is None:
             print("Error: --dataset is required when using few_shot prompt type")
             return
-    
     resume_from = Path(args.resume_from) if args.resume_from else None
     output_path = Path(args.output) if args.output else None
-    
     out = run_experiment(
         model_type=args.model,
         model_name=args.model_name,
@@ -533,7 +476,6 @@ def main():
         rerun_errors_only=args.rerun_errors_only,
         output_path=output_path
     )
-    
     print(f"\nOutput file: {out}")
 
 if __name__ == "__main__":
